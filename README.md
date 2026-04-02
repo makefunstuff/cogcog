@@ -139,6 +139,42 @@ git diff --staged | cogcog "review this diff"
 kubectl get events -n prod | cogcog "anything alarming here?"
 ```
 
+### Vibe mode
+
+Nothing stops you from going full slopgen. Open a buffer, type what you want, send it.
+
+```vim
+" yolo a whole component
+:enew | setlocal buftype=nofile ft=markdown
+" type: write me a react dashboard with charts and dark mode
+" <leader>cs → paste the output into your project
+
+" generate from shell, pipe straight to a file
+echo "write a Go CLI that watches a directory for changes and runs make" | cogcog > cmd/watcher/main.go
+
+" chain it — generate, then immediately review your own slop
+echo "write a python script that converts CSV to JSON" | cogcog | tee convert.py | cogcog "review this for bugs"
+
+" scaffold fast
+echo "terraform module for an RDS postgres with read replica" | cogcog > modules/rds/main.tf
+echo "dockerfile for a bun app with multi-stage build" | cogcog > Dockerfile
+
+" generate an entire frontend — dump it, split it, ship it
+echo "react app with tailwind: login page, dashboard with sidebar,
+settings page, dark mode toggle, mock auth flow. include routing.
+output each file with its path as a header." | cogcog > frontend.md
+
+" full feature — go nuts
+echo "express.js REST API:
+- sqlite with knex migrations
+- user auth (JWT, bcrypt)
+- CRUD for posts with pagination
+- rate limiting middleware
+- error handling
+- seed script with fake data
+output as separate files with paths: src/db.ts, src/routes/, src/middleware/, etc" | cogcog > feature.md
+```
+
 ## Configuration
 
 ```bash
