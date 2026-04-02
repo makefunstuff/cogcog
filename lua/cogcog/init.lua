@@ -1,45 +1,52 @@
 -- cogcog — LLM as a vim verb
 --
--- ga{motion} / visual ga   stateless ask → response split
--- gs{motion} / visual gs   stateless generate → code buffer
--- <C-g>                    stateful follow-up → context panel
--- <leader>cy               pin selection to context
--- <leader>co               toggle context panel
--- <leader>cc               clear context
---
--- context is just a buffer. use :read .cogcog/review.md to add skills.
--- use :read !git diff to add tools. use dap to remove sections.
+-- ga{motion} / visual ga        stateless ask → response split
+-- gs{motion} / visual gs        stateless generate → code buffer
+-- <leader>gc{motion} / visual   check with cloud model
+-- <C-g>                         stateful follow-up → context panel
+-- <leader>cy                    pin selection to context
+-- <leader>co                    toggle context panel
+-- <leader>cc                    clear context
+-- <C-c>                         cancel running job
 
 local cogcog_dir = vim.fn.getcwd() .. "/.cogcog"
 local session_file = cogcog_dir .. "/session.md"
-local ns = vim.api.nvim_create_namespace("cogcog")
+local cogcog_bin = vim.fn.exepath("cogcog")
+if cogcog_bin == "" then cogcog_bin = "cogcog" end
 
--- shared: pipe lines through cogcog, stream into a buffer
+local active_jobs = {} -- track all running jobs for cancellation
+
+-- shared: pipe lines through a command, stream into a buffer
 
 local function stream_to_buf(lines, buf, opts)
 	opts = opts or {}
 	local tmp = vim.fn.tempname()
 	vim.fn.writefile(lines, tmp)
 
-	local cogcog_bin = vim.fn.exepath("cogcog")
-	if cogcog_bin == "" then cogcog_bin = "cogcog" end
+	local cmd = opts.cmd or cogcog_bin
 	local flag = opts.raw and " --raw" or ""
+	local shell_cmd = cmd .. flag .. " < " .. vim.fn.shellescape(tmp)
 	local first = true
 
 	vim.notify("cogcog: thinking...", vim.log.levels.INFO)
 
-	return vim.fn.jobstart({ "bash", "-c", cogcog_bin .. flag .. " < " .. vim.fn.shellescape(tmp) }, {
+	local job = vim.fn.jobstart({ "bash", "-c", shell_cmd }, {
 		stdout_buffered = false,
 		on_stdout = function(_, data)
 			if not data then return end
 			vim.schedule(function()
 				if not vim.api.nvim_buf_is_valid(buf) then return end
 				if first then
-					vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "" })
+					-- only append blank line if buffer already has content
+					local lc = vim.api.nvim_buf_line_count(buf)
+					local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
+					if last ~= "" then
+						vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "" })
+					end
 					first = false
 				end
 				for i, chunk in ipairs(data) do
-					chunk = chunk:gsub("\27%[[%d;]*m", "") -- strip ansi
+					chunk = chunk:gsub("\27%[[%d;]*m", "")
 					local lc = vim.api.nvim_buf_line_count(buf)
 					if i == 1 then
 						local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
@@ -48,7 +55,6 @@ local function stream_to_buf(lines, buf, opts)
 						vim.api.nvim_buf_set_lines(buf, lc, lc, false, { chunk })
 					end
 				end
-				-- auto-scroll any window showing this buffer
 				for _, w in ipairs(vim.api.nvim_list_wins()) do
 					if vim.api.nvim_win_get_buf(w) == buf then
 						pcall(vim.api.nvim_win_set_cursor, w, { vim.api.nvim_buf_line_count(buf), 0 })
@@ -59,6 +65,7 @@ local function stream_to_buf(lines, buf, opts)
 		on_exit = function(_, code)
 			vim.schedule(function()
 				vim.fn.delete(tmp)
+				active_jobs[job] = nil
 				if code ~= 0 then
 					vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
 				else
@@ -68,9 +75,23 @@ local function stream_to_buf(lines, buf, opts)
 			end)
 		end,
 	})
+
+	if job and job > 0 then active_jobs[job] = true end
+	return job
 end
 
--- context panel (stateful, for <C-g> planning)
+-- cancel all running jobs
+local function cancel_all()
+	local count = 0
+	for job, _ in pairs(active_jobs) do
+		vim.fn.jobstop(job)
+		count = count + 1
+	end
+	active_jobs = {}
+	if count > 0 then vim.notify("cogcog: cancelled", vim.log.levels.INFO) end
+end
+
+-- context panel
 
 local function get_or_create_ctx()
 	for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -147,20 +168,39 @@ local function gather_quickfix()
 	return out
 end
 
--- ga: ask. stateful if panel is open (discovery), stateless otherwise (quick ask)
+local function make_split(vertical, buf, statusline)
+	if vertical then
+		local width = math.floor(vim.o.columns * 0.4)
+		vim.cmd("botright vsplit")
+		vim.cmd("vertical resize " .. width)
+	else
+		local height = math.max(10, math.floor(vim.o.lines * 0.4))
+		vim.cmd("botright " .. height .. "split")
+	end
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
+	vim.api.nvim_set_option_value("wrap", true, { win = win })
+	vim.api.nvim_set_option_value("linebreak", true, { win = win })
+	vim.api.nvim_set_option_value("statusline", statusline, { win = win })
+	vim.cmd("wincmd p")
+	return win
+end
 
-local ask_job = nil
+local function visual_then(fn)
+	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+	vim.schedule(function()
+		local lines, name, l1, l2 = get_visual_selection()
+		fn(lines, name .. ":" .. l1 .. "-" .. l2)
+	end)
+end
+
+-- ga: ask (stateful if panel open, stateless otherwise)
 
 local function ask_send(code_lines, source, question)
-	if ask_job then
-		vim.notify("cogcog: running...", vim.log.levels.WARN)
-		return
-	end
-
 	local stateful = ctx_win() ~= nil
 
 	if stateful then
-		-- append to context panel and send everything
 		local ctx = get_or_create_ctx()
 		if code_lines and #code_lines > 0 then
 			vim.api.nvim_buf_set_lines(ctx, -1, -1, false,
@@ -169,61 +209,41 @@ local function ask_send(code_lines, source, question)
 		end
 		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "", "---", "" })
 
-		local lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
-		ask_job = stream_to_buf(lines, ctx, {
+		stream_to_buf(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), ctx, {
 			raw = true,
 			on_done = function()
-				ask_job = nil
 				if vim.api.nvim_buf_is_valid(ctx) then
 					vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "" })
 				end
 			end,
 		})
 	else
-		-- stateless: build fresh input, throwaway split
 		local input = {}
-
 		local sys = cogcog_dir .. "/system.md"
 		if vim.fn.filereadable(sys) == 1 then
 			vim.list_extend(input, vim.fn.readfile(sys))
 			table.insert(input, "")
 		end
-
 		local qf = gather_quickfix()
 		if #qf > 0 then
 			table.insert(input, "--- quickfix ---")
 			vim.list_extend(input, qf)
 			table.insert(input, "")
 		end
-
 		if code_lines and #code_lines > 0 then
 			table.insert(input, "--- " .. source .. " ---")
 			table.insert(input, "")
 			vim.list_extend(input, code_lines)
 			table.insert(input, "")
 		end
-
 		table.insert(input, question)
 
 		local buf = vim.api.nvim_create_buf(false, true)
 		vim.bo[buf].filetype = "markdown"
 		vim.bo[buf].buftype = "nofile"
-
-		local width = math.floor(vim.o.columns * 0.4)
-		vim.cmd("botright vsplit")
-		vim.cmd("vertical resize " .. width)
-		vim.api.nvim_win_set_buf(0, buf)
 		vim.api.nvim_set_option_value("number", false, { win = 0 })
-		vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
-		vim.api.nvim_set_option_value("wrap", true, { win = 0 })
-		vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
-		vim.api.nvim_set_option_value("statusline", " cogcog ask │ " .. question:sub(1, 40), { win = 0 })
-		vim.cmd("wincmd p")
-
-		ask_job = stream_to_buf(input, buf, {
-			raw = true,
-			on_done = function() ask_job = nil end,
-		})
+		make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
+		stream_to_buf(input, buf, { raw = true })
 	end
 end
 
@@ -234,19 +254,16 @@ local function ask(code_lines, source)
 	end)
 end
 
--- gs: stateless generate → code buffer
+-- gs: generate → code buffer
 
 local function gen_send(code_lines, source, instruction)
 	local input = {}
-
 	if code_lines and #code_lines > 0 then
 		table.insert(input, "--- " .. source .. " ---")
 		table.insert(input, "")
 		vim.list_extend(input, code_lines)
 		table.insert(input, "")
 	end
-
-	-- include planning context if non-empty
 	local ctx = get_or_create_ctx()
 	local ctx_lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
 	if vim.trim(table.concat(ctx_lines, "\n")) ~= "" then
@@ -255,7 +272,6 @@ local function gen_send(code_lines, source, instruction)
 		vim.list_extend(input, ctx_lines)
 		table.insert(input, "")
 	end
-
 	table.insert(input, instruction)
 	table.insert(input, "")
 	table.insert(input, "Output only the code. No explanations unless asked.")
@@ -263,16 +279,8 @@ local function gen_send(code_lines, source, instruction)
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[buf].buftype = "nofile"
 	vim.bo[buf].filetype = "markdown"
-
-	local height = math.max(10, math.floor(vim.o.lines * 0.4))
-	vim.cmd("botright " .. height .. "split")
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
+	local win = make_split(false, buf, " cogcog gen │ " .. instruction:sub(1, 40))
 	vim.api.nvim_set_option_value("number", true, { win = win })
-	vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
-	vim.api.nvim_set_option_value("statusline",
-		" cogcog gen │ " .. instruction:sub(1, 40), { win = win })
-	vim.cmd("wincmd p")
 
 	stream_to_buf(input, buf, {
 		raw = false,
@@ -307,28 +315,38 @@ local function gen(code_lines, source)
 	end)
 end
 
+-- <leader>gc: check with cloud model
+
+local checker_cmd = "pi -p --provider anthropic --model opus:xhigh"
+
+local function check_send(code_lines, source)
+	local input = {
+		"Review this code for correctness, edge cases, and bugs.",
+		"Be concise. Only flag real problems.",
+		"",
+		"--- " .. source .. " ---",
+		"",
+	}
+	vim.list_extend(input, code_lines)
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.bo[buf].filetype = "markdown"
+	vim.bo[buf].buftype = "nofile"
+	make_split(true, buf, " cogcog check │ " .. source:sub(1, 30))
+	stream_to_buf(input, buf, { cmd = checker_cmd })
+end
+
 -- <C-g>: stateful planning → context panel
 
-local plan_job = nil
-
 local function plan_send(question)
-	if plan_job then
-		vim.notify("cogcog: running...", vim.log.levels.WARN)
-		return
-	end
-
 	local ctx = get_or_create_ctx()
 	if question then
 		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "", "---", "" })
 	end
-
 	show_panel()
-	local lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
-
-	plan_job = stream_to_buf(lines, ctx, {
+	stream_to_buf(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), ctx, {
 		raw = true,
 		on_done = function()
-			plan_job = nil
 			if vim.api.nvim_buf_is_valid(ctx) then
 				vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "" })
 			end
@@ -371,12 +389,11 @@ function _G._cogcog_gen_op(type)
 	gen(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
 end
 
-local function visual_then(fn)
-	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
-	vim.schedule(function()
-		local lines, name, l1, l2 = get_visual_selection()
-		fn(lines, name .. ":" .. l1 .. "-" .. l2)
-	end)
+function _G._cogcog_check_op(type)
+	local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
+	local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
+	if #lines == 0 then return end
+	check_send(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
 end
 
 -- keymaps
@@ -394,6 +411,15 @@ vim.keymap.set("n", "gs", function()
 end, { expr = true, desc = "cogcog: generate from {motion}" })
 
 vim.keymap.set("v", "gs", function() visual_then(gen) end, { desc = "cogcog: generate" })
+
+vim.keymap.set("n", "<leader>gc", function()
+	vim.o.operatorfunc = "v:lua._cogcog_check_op"
+	return "g@"
+end, { expr = true, desc = "cogcog: check {motion}" })
+
+vim.keymap.set("v", "<leader>gc", function()
+	visual_then(function(lines, source) check_send(lines, source) end)
+end, { desc = "cogcog: check selection" })
 
 vim.keymap.set("n", "<C-g>", function()
 	vim.ui.input({ prompt = " plan: " }, function(q)
@@ -417,93 +443,6 @@ vim.keymap.set("n", "<leader>co", function()
 	else show_panel() end
 end, { desc = "cogcog: toggle panel" })
 
--- gc: check — send buffer/selection to cloud model for verification
-local checker_cmd = "pi -p --provider anthropic --model opus:xhigh"
-
-local function check_send(code_lines, source)
-	local input = {
-		"Review this code for correctness, edge cases, and bugs.",
-		"Be concise. Only flag real problems.",
-		"",
-		"--- " .. source .. " ---",
-		"",
-	}
-	vim.list_extend(input, code_lines)
-
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.bo[buf].filetype = "markdown"
-	vim.bo[buf].buftype = "nofile"
-
-	local width = math.floor(vim.o.columns * 0.4)
-	vim.cmd("botright vsplit")
-	vim.cmd("vertical resize " .. width)
-	vim.api.nvim_win_set_buf(0, buf)
-	vim.api.nvim_set_option_value("number", false, { win = 0 })
-	vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
-	vim.api.nvim_set_option_value("wrap", true, { win = 0 })
-	vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
-	vim.api.nvim_set_option_value("statusline", " cogcog check │ " .. source:sub(1, 30), { win = 0 })
-	vim.cmd("wincmd p")
-
-	local tmp = vim.fn.tempname()
-	vim.fn.writefile(input, tmp)
-	vim.notify("cogcog: checking...", vim.log.levels.INFO)
-
-	local first = true
-	vim.fn.jobstart({ "bash", "-c", checker_cmd .. " < " .. vim.fn.shellescape(tmp) }, {
-		stdout_buffered = false,
-		on_stdout = function(_, data)
-			if not data then return end
-			vim.schedule(function()
-				if not vim.api.nvim_buf_is_valid(buf) then return end
-				if first then
-					first = false
-				end
-				for i, chunk in ipairs(data) do
-					chunk = chunk:gsub("\27%[[%d;]*m", "")
-					local lc = vim.api.nvim_buf_line_count(buf)
-					if i == 1 then
-						local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
-						vim.api.nvim_buf_set_lines(buf, lc - 1, lc, false, { last .. chunk })
-					else
-						vim.api.nvim_buf_set_lines(buf, lc, lc, false, { chunk })
-					end
-				end
-				for _, w in ipairs(vim.api.nvim_list_wins()) do
-					if vim.api.nvim_win_get_buf(w) == buf then
-						pcall(vim.api.nvim_win_set_cursor, w, { vim.api.nvim_buf_line_count(buf), 0 })
-					end
-				end
-			end)
-		end,
-		on_exit = function(_, code)
-			vim.schedule(function()
-				vim.fn.delete(tmp)
-				if code == 0 then vim.notify("cogcog: check done", vim.log.levels.INFO)
-				else vim.notify("cogcog: check exit " .. code, vim.log.levels.ERROR) end
-			end)
-		end,
-	})
-end
-
-function _G._cogcog_check_op(type)
-	local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
-	local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
-	if #lines == 0 then return end
-	check_send(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
-end
-
-vim.keymap.set("n", "gc", function()
-	vim.o.operatorfunc = "v:lua._cogcog_check_op"
-	return "g@"
-end, { expr = true, desc = "cogcog: check {motion}" })
-
-vim.keymap.set("v", "gc", function()
-	visual_then(function(lines, source)
-		check_send(lines, source)
-	end)
-end, { desc = "cogcog: check selection" })
-
 vim.keymap.set("n", "<leader>cc", function()
 	local buf = get_or_create_ctx()
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
@@ -514,3 +453,7 @@ vim.keymap.set("n", "<leader>cc", function()
 	end
 	vim.notify("cogcog: cleared")
 end, { desc = "cogcog: clear" })
+
+vim.keymap.set({ "n", "i" }, "<C-c>", function()
+	cancel_all()
+end, { desc = "cogcog: cancel" })

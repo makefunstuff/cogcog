@@ -4,11 +4,19 @@ LLM as a vim verb.
 
 **You build context manually, so you read the code. You choose what matters. The LLM only sees what you curated.**
 
+## Three verbs
+
+| Verb | What | Model | Cost |
+|------|------|-------|------|
+| `ga` | ask / explain | gemma4 E4B (local) | $0 |
+| `gs` | generate code | kimi-k2.5 (opencode zen) | sub |
+| `<leader>gc` | verify / check | opus xhigh (anthropic) | sub |
+
+`ga` and `gs` compose with any vim motion: `gaip`, `gsaf`, `<leader>gcaf`.
+
 ## Workflows
 
-### Ask (`ga`) — stateless, fast
-
-Select code, ask a question, get an answer in a throwaway split. Direct API call, no agent. Cursor stays in your code.
+### Ask (`ga`) — fast, local
 
 ```
 gaip        → "what does this do?"
@@ -16,27 +24,36 @@ gaf         → "any bugs here?"
 Visual ga   → "explain the error"
 ```
 
+Panel closed = stateless (throwaway split). Panel open = stateful (conversation accumulates).
+
 Quickfix entries (LSP diagnostics, `:grep`, `:make` errors) are auto-included.
 
-### Generate (`gs`) — agentic
-
-Select code or start from scratch, generate into a fresh code buffer. Uses agent backend with tool calls.
+### Generate (`gs`) — agentic, cloud
 
 ```
 gsip        → "rewrite in async/await"
 Visual gs   → "add error handling"
 ```
 
-Output auto-detects language from code fences, strips them, sets filetype. `:w filename` to save.
+Uses an agent backend with tool calls and web search. Output auto-detects language, strips code fences, sets filetype. `:w filename` to save.
+
+### Check (`<leader>gc`) — deep verification
+
+```
+<leader>gcaf    → opus reviews this function
+Visual <leader>gc → opus reviews selection
+```
+
+Generate cheap, verify smart. Local model writes, cloud model catches bugs.
 
 ### Plan (`<C-g>`) — stateful conversation
-
-Multi-turn planning in a context panel. Build up context, discuss, iterate. When ready, `gs` to generate code.
 
 ```
 <C-g>       → "let's design the auth flow"
 <C-g>       → "what about token refresh?"
 ```
+
+Build up context with `<leader>cy`, then `gs` to materialize code from the plan.
 
 ## Install
 
@@ -51,22 +68,24 @@ Neovim (lazy.nvim):
 { dir = "/path/to/cogcog" }
 ```
 
+Requires: `curl`, `jq` for raw API path.
+
 ## Configuration
 
 ```bash
-# fast path (ga): direct API via any OpenAI-compatible provider
+# ga: fast local model (any OpenAI-compatible endpoint)
 export COGCOG_BACKEND=openai
-export COGCOG_API_URL=https://openrouter.ai/api/v1/chat/completions
-export COGCOG_API_KEY="sk-or-..."
-export COGCOG_FAST_MODEL="google/gemini-2.5-flash"   # fast model for ask
-export COGCOG_MODEL="moonshotai/kimi-k2.5"           # default model
+export COGCOG_API_URL=http://192.168.1.138:8090/v1/chat/completions
+export COGCOG_API_KEY=unused
+export COGCOG_FAST_MODEL="gemma-4-E4B-it-Q4_K_M"
 
-# agent path (gs): any stdin→stdout CLI
+# gs: agent backend (any stdin→stdout CLI with tool calling)
 export COGCOG_CMD="opencode run -m opencode/kimi-k2.5"
 
-# or use Anthropic directly (default when no COGCOG_BACKEND is set)
-export ANTHROPIC_API_KEY="sk-ant-..."
+# gc: checker is configured in lua (default: pi -p --provider anthropic --model opus:xhigh)
 ```
+
+The three paths can point anywhere — local Ollama, OpenRouter, Anthropic, any OpenAI-compatible API.
 
 ## Keymaps
 
@@ -76,10 +95,13 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `ga` | visual | ask about selection |
 | `gs{motion}` | normal | generate from text object |
 | `gs` | visual | generate from selection |
+| `<leader>gc{motion}` | normal | check text object |
+| `<leader>gc` | visual | check selection |
 | `<C-g>` | normal | plan (stateful follow-up) |
 | `<leader>cy` | visual | pin selection to context |
 | `<leader>co` | normal | toggle context panel |
 | `<leader>cc` | normal | clear context |
+| `<C-c>` | any | cancel running job |
 
 ## Context
 
@@ -88,19 +110,16 @@ Context is a buffer. Use Neovim to manage it:
 ```vim
 :read .cogcog/review.md          " add a skill
 :read !git diff                  " add tool output
-:read !tree -L 3                 " add project tree
 dap                              " delete a section
-:w .cogcog/session.md            " save manually
 ```
 
-Session auto-saves on exit and restores on open. System prompt loads from `.cogcog/system.md`.
+Session auto-saves on exit. System prompt loads from `.cogcog/system.md`.
 
 ## Shell
 
 ```bash
 echo "explain CRDs" | cogcog
-git diff --staged | cogcog "review this"
-echo "quick question" | cogcog --raw    # bypass agent, hit API directly
+git diff --staged | cogcog --raw "review this"
 ```
 
 See **[USAGE.md](USAGE.md)** for tricks, patterns, and how vim primitives replace agent features.
