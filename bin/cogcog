@@ -35,16 +35,23 @@ BACKEND="${COGCOG_BACKEND:-anthropic}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
 SYSTEM="${COGCOG_SYSTEM:-}"
 
+# COGCOG_FAST_MODEL overrides COGCOG_MODEL when --raw is used (for quick ask)
+if [[ -n "${COGCOG_FAST_MODEL:-}" ]]; then
+  _DEFAULT_MODEL="$COGCOG_FAST_MODEL"
+else
+  _DEFAULT_MODEL="${COGCOG_MODEL:-}"
+fi
+
 case "$BACKEND" in
   anthropic)
     API_KEY="${COGCOG_API_KEY:-${ANTHROPIC_API_KEY:-}}"
     API_URL="${COGCOG_API_URL:-https://api.anthropic.com/v1/messages}"
-    MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
+    MODEL="${_DEFAULT_MODEL:-claude-sonnet-4-20250514}"
     ;;
   openai)
     API_KEY="${COGCOG_API_KEY:-${OPENAI_API_KEY:-}}"
     API_URL="${COGCOG_API_URL:-https://api.openai.com/v1/chat/completions}"
-    MODEL="${COGCOG_MODEL:-gpt-4o}"
+    MODEL="${_DEFAULT_MODEL:-gpt-4o}"
     ;;
   *)
     echo "cogcog: unknown backend '$BACKEND' (use anthropic or openai)" >&2

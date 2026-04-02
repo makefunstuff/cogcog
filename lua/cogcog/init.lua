@@ -359,7 +359,16 @@ local function send()
 	local tmp = vim.fn.tempname()
 	vim.fn.writefile(lines, tmp)
 
-	append({ "", "---", "", spinner_frames[1] .. " thinking..." })
+	append({ "", "---", "" })
+
+	-- add virtual text separator for the --- line
+	local sep_line = vim.api.nvim_buf_line_count(ctx) - 2 -- the --- line
+	vim.api.nvim_buf_set_extmark(ctx, ns, sep_line, 0, {
+		virt_text = { { string.rep("─", 60), "CogcogSep" } },
+		virt_text_pos = "overlay",
+	})
+
+	append({ spinner_frames[1] .. " thinking..." })
 	scroll_bottom()
 	start_spinner(ctx)
 
@@ -632,17 +641,23 @@ local function slopgen(code_lines, source_name)
 		local out_buf = vim.api.nvim_create_buf(false, true)
 		vim.bo[out_buf].buftype = "nofile"
 		vim.bo[out_buf].filetype = "markdown"
-		vim.api.nvim_buf_set_name(out_buf, "[cogcog-gen]")
+		-- use unique name so multiple gens don't collide
+		local gen_name = "[cogcog-gen-" .. os.time() .. "]"
+		vim.api.nvim_buf_set_name(out_buf, gen_name)
 		vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, { spinner_frames[1] .. " generating..." })
 
-		-- open in a split below
-		vim.cmd("botright split")
+		-- open in a split below, 40% height
+		local height = math.max(10, math.floor(vim.o.lines * 0.4))
+		vim.cmd("botright " .. height .. "split")
 		local out_win = vim.api.nvim_get_current_win()
 		vim.api.nvim_win_set_buf(out_win, out_buf)
-		vim.api.nvim_set_option_value("number", false, { win = out_win })
+		vim.api.nvim_set_option_value("number", true, { win = out_win })
 		vim.api.nvim_set_option_value("signcolumn", "no", { win = out_win })
 		vim.api.nvim_set_option_value("wrap", true, { win = out_win })
-		vim.api.nvim_set_option_value("statusline", " cogcog gen", { win = out_win })
+		vim.api.nvim_set_option_value("linebreak", true, { win = out_win })
+		vim.api.nvim_set_option_value("cursorline", true, { win = out_win })
+		vim.api.nvim_set_option_value("statusline",
+			" %#CogcogActive#cogcog gen%#CogcogStatus# │ " .. instruction:sub(1, 40), { win = out_win })
 
 		-- write input to tmp, send
 		local tmp = vim.fn.tempname()
@@ -684,6 +699,34 @@ local function slopgen(code_lines, source_name)
 					vim.fn.delete(tmp)
 					if code ~= 0 then
 						vim.notify("cogcog gen: exit " .. code, vim.log.levels.ERROR)
+						return
+					end
+					if not vim.api.nvim_buf_is_valid(out_buf) then return end
+					-- detect language from code fences and strip them
+					local lines = vim.api.nvim_buf_get_lines(out_buf, 0, -1, false)
+					-- strip leading/trailing blank lines
+					while #lines > 0 and vim.trim(lines[1]) == "" do table.remove(lines, 1) end
+					while #lines > 0 and vim.trim(lines[#lines]) == "" do table.remove(lines) end
+					if #lines >= 2 then
+						local first = lines[1]
+						local last = lines[#lines]
+						local lang = first:match("^```(%w+)")
+						if lang and last:match("^```%s*$") then
+							-- strip fences, set filetype
+							table.remove(lines, 1)
+							table.remove(lines)
+							vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, lines)
+							local ft_map = {
+								js = "javascript", ts = "typescript", py = "python",
+								rb = "ruby", rs = "rust", sh = "bash", zsh = "bash",
+								yml = "yaml", md = "markdown",
+							}
+							vim.bo[out_buf].filetype = ft_map[lang] or lang
+						end
+					end
+					if vim.api.nvim_win_is_valid(out_win) then
+						vim.api.nvim_set_option_value("statusline",
+							" cogcog gen │ done │ :w to save", { win = out_win })
 					end
 				end)
 			end,
