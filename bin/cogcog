@@ -10,10 +10,16 @@
 #
 # Env:
 #   COGCOG_CMD         delegate to another CLI (e.g. "claude -p", "opencode run")
-#   COGCOG_MODEL       model name       (default: claude-sonnet-4-20250514)
+#   COGCOG_BACKEND     "anthropic" (default) or "openai" (OpenRouter, Ollama, Groq, etc.)
+#   COGCOG_API_URL     override API endpoint (e.g. http://localhost:11434/v1/chat/completions)
+#   COGCOG_API_KEY     API key (overrides backend-specific env vars)
+#   COGCOG_MODEL       model name
 #   COGCOG_MAX_TOKENS  max tokens       (default: 8192)
 #   COGCOG_SYSTEM      system prompt    (optional)
-#   ANTHROPIC_API_KEY  required (unless COGCOG_CMD is set)
+#
+# Backend defaults:
+#   anthropic: ANTHROPIC_API_KEY, claude-sonnet-4-20250514
+#   openai:    OPENAI_API_KEY, gpt-4o (set COGCOG_API_URL for OpenRouter/Ollama/Groq)
 
 set -euo pipefail
 
@@ -22,16 +28,33 @@ if [[ -n "${COGCOG_CMD:-}" ]]; then
   exec $COGCOG_CMD "$@"
 fi
 
-MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
+BACKEND="${COGCOG_BACKEND:-anthropic}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
 SYSTEM="${COGCOG_SYSTEM:-}"
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "cogcog: ANTHROPIC_API_KEY not set (or set COGCOG_CMD to use another backend)" >&2
+case "$BACKEND" in
+  anthropic)
+    API_KEY="${COGCOG_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+    API_URL="${COGCOG_API_URL:-https://api.anthropic.com/v1/messages}"
+    MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
+    ;;
+  openai)
+    API_KEY="${COGCOG_API_KEY:-${OPENAI_API_KEY:-}}"
+    API_URL="${COGCOG_API_URL:-https://api.openai.com/v1/chat/completions}"
+    MODEL="${COGCOG_MODEL:-gpt-4o}"
+    ;;
+  *)
+    echo "cogcog: unknown backend '$BACKEND' (use anthropic or openai)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -z "$API_KEY" ]]; then
+  echo "cogcog: no API key (set COGCOG_API_KEY or backend-specific env var)" >&2
   exit 1
 fi
 
-# read stdin to temp file to avoid bash variable size limits
+# read stdin
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 cat > "$tmp"
@@ -43,70 +66,105 @@ fi
 
 input=$(<"$tmp")
 
-# build request body
-if [[ -n "$SYSTEM" ]]; then
-  body=$(jq -n \
-    --arg model "$MODEL" \
-    --argjson max_tokens "$MAX_TOKENS" \
-    --arg system "$SYSTEM" \
-    --arg content "$input" \
-    '{model: $model, max_tokens: $max_tokens, system: $system, stream: true,
-      messages: [{role: "user", content: $content}]}')
-else
-  body=$(jq -n \
-    --arg model "$MODEL" \
-    --argjson max_tokens "$MAX_TOKENS" \
-    --arg content "$input" \
-    '{model: $model, max_tokens: $max_tokens, stream: true,
-      messages: [{role: "user", content: $content}]}')
-fi
+# build request body — differs by backend
+case "$BACKEND" in
+  anthropic)
+    if [[ -n "$SYSTEM" ]]; then
+      body=$(jq -n \
+        --arg model "$MODEL" \
+        --argjson max_tokens "$MAX_TOKENS" \
+        --arg system "$SYSTEM" \
+        --arg content "$input" \
+        '{model: $model, max_tokens: $max_tokens, system: $system, stream: true,
+          messages: [{role: "user", content: $content}]}')
+    else
+      body=$(jq -n \
+        --arg model "$MODEL" \
+        --argjson max_tokens "$MAX_TOKENS" \
+        --arg content "$input" \
+        '{model: $model, max_tokens: $max_tokens, stream: true,
+          messages: [{role: "user", content: $content}]}')
+    fi
 
-# stream response — show chunks as they arrive
-curl -sS -w '\n%{http_code}' https://api.anthropic.com/v1/messages \
-  -H "x-api-key: $ANTHROPIC_API_KEY" \
-  -H "anthropic-version: 2023-06-01" \
+    curl_args=(
+      -H "x-api-key: $API_KEY"
+      -H "anthropic-version: 2023-06-01"
+    )
+    ;;
+  openai)
+    if [[ -n "$SYSTEM" ]]; then
+      body=$(jq -n \
+        --arg model "$MODEL" \
+        --argjson max_tokens "$MAX_TOKENS" \
+        --arg system "$SYSTEM" \
+        --arg content "$input" \
+        '{model: $model, max_tokens: $max_tokens, stream: true,
+          messages: [{role: "system", content: $system}, {role: "user", content: $content}]}')
+    else
+      body=$(jq -n \
+        --arg model "$MODEL" \
+        --argjson max_tokens "$MAX_TOKENS" \
+        --arg content "$input" \
+        '{model: $model, max_tokens: $max_tokens, stream: true,
+          messages: [{role: "user", content: $content}]}')
+    fi
+
+    curl_args=(
+      -H "Authorization: Bearer $API_KEY"
+    )
+    ;;
+esac
+
+# stream response
+curl -sS -w '\n%{http_code}' "$API_URL" \
+  "${curl_args[@]}" \
   -H "content-type: application/json" \
   -d "$body" 2>/dev/null \
 | {
   output=""
   http_code=""
   while IFS= read -r line; do
-    # last line is the http status code from -w
     if [[ "$line" =~ ^[0-9]{3}$ ]]; then
       http_code="$line"
       continue
     fi
 
-    # skip SSE prefixes and empty lines
     line="${line#data: }"
     [[ -z "$line" ]] && continue
     [[ "$line" == "event:"* ]] && continue
+    [[ "$line" == "[DONE]" ]] && continue
 
-    # extract text deltas
-    type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null) || continue
-
-    case "$type" in
-      content_block_delta)
-        chunk=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
+    case "$BACKEND" in
+      anthropic)
+        type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null) || continue
+        case "$type" in
+          content_block_delta)
+            chunk=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
+            if [[ -n "$chunk" ]]; then
+              printf '%s' "$chunk"
+              output+="$chunk"
+            fi
+            ;;
+          error)
+            msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+            echo "cogcog: API error — $msg" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      openai)
+        chunk=$(echo "$line" | jq -r '.choices[0].delta.content // empty' 2>/dev/null) || continue
         if [[ -n "$chunk" ]]; then
           printf '%s' "$chunk"
           output+="$chunk"
         fi
         ;;
-      error)
-        msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
-        echo "cogcog: API error — $msg" >&2
-        exit 1
-        ;;
     esac
   done
 
-  # trailing newline
   [[ -n "$output" ]] && echo
 
-  # check http status
   if [[ "$http_code" != "200" && -n "$http_code" ]]; then
-    # non-streaming error (auth, rate limit, etc.)
     if [[ -z "$output" ]]; then
       echo "cogcog: HTTP $http_code" >&2
       exit 1
