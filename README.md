@@ -103,10 +103,12 @@ git diff --staged | cogcog "review this"
 echo "quick question" | cogcog --raw    # bypass agent, hit API directly
 ```
 
+See **[USAGE.md](USAGE.md)** for tricks, patterns, and how vim primitives replace agent features.
+
 ## Structure
 
 ```
 bin/cogcog              # bash: stdin → LLM → stdout
-lua/cogcog/init.lua     # neovim: ga/gs/plan
+lua/cogcog/init.lua     # neovim: ga/gs/gc/plan
 .cogcog/                # project skills and templates
 ```

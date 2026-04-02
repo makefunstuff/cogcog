@@ -568,6 +568,250 @@ You closed the loop 3 times in under a minute. You read every line. You ran the 
 
 The difference from automated Ralph: you learn what retry logic looks like, you see why the first attempt failed, you understand what the checker caught. The agent version ships faster but teaches nothing.
 
+---
+
+## Replacing agent features with vim
+
+Every feature of a coding agent is a vim primitive you already have.
+
+### "Codebase search" — agents grep for you. You can grep.
+
+An agent spends 10 seconds and 5 tool calls finding where `handleAuth` is defined.
+
+```vim
+:grep "handleAuth" src/**/*.ts
+:copen                              " quickfix list with every match
+```
+
+0.1 seconds. Now ask about what you found:
+
+```
+gaip → "which of these is the main implementation vs tests?"
+```
+
+### "Read file" — agents read files for you. You have `:read`.
+
+An agent calls `read_file("src/config.ts")` and burns 500 tokens on tool call overhead.
+
+```vim
+:read src/config.ts                 " instant, zero tokens wasted
+```
+
+Or read just the part you care about:
+
+```vim
+:read !sed -n '40,60p' src/config.ts
+```
+
+### "Multi-file edit" — agents edit files for you. You have arglist.
+
+An agent iterates over files with tool calls. You have `:argdo`:
+
+```vim
+:args src/**/*.ts
+:argdo %s/oldFunc/newFunc/g | update
+```
+
+Need the LLM to decide what to change? Generate a sed script:
+
+```
+<C-g> → "write a sed command that renames oldFunc to newFunc 
+         but only in function calls, not the definition"
+```
+
+Copy the command, run it. You verified the regex. The agent wouldn't.
+
+### "Run tests" — agents run tests for you. You have `:make`.
+
+```vim
+:set makeprg=npm\ test
+:make                               " runs tests, errors → quickfix
+:cnext                              " jump to first failure
+gaip → "why is this failing?"       " quickfix auto-included
+```
+
+`:make` + quickfix + `ga` = the entire "run tests, read errors, explain failure" agent loop. Built into vim since 1991.
+
+### "Project structure" — agents call `tree`. You have `:read !`.
+
+```vim
+:read !tree -L 3 --noreport -I node_modules
+<C-g> → "where should I add the new middleware?"
+```
+
+### "Code review" — agents diff for you. You have fugitive.
+
+```vim
+:Git diff main                      " fugitive shows the diff
+```
+
+Select the hunks you want reviewed → `ga` → "any issues?"
+
+Or the whole thing:
+
+```bash
+git diff main | cogcog --raw "review for bugs, security, performance"
+```
+
+### "Web search" — agents search for you. You have a terminal.
+
+```vim
+:read !curl -s "https://api.duckduckgo.com/?q=golang+mutex+best+practices&format=json" | jq '.AbstractText'
+```
+
+Or just:
+
+```vim
+:read !pi-search "golang mutex patterns" 2>/dev/null | head -20
+<C-g> → "based on these results, should I use sync.Mutex or sync.RWMutex here?"
+```
+
+### "Context gathering" — agents read 15 files. You read what matters.
+
+The agent's approach:
+
+```
+1. Read src/auth.ts (2000 tokens)
+2. Read src/middleware.ts (1500 tokens)  
+3. Read src/types.ts (800 tokens)
+4. Read src/config.ts (600 tokens)
+5. Read src/utils.ts (1200 tokens)
+... 10 more files
+Total: 15000 tokens of context, 80% irrelevant
+```
+
+Your approach:
+
+```vim
+:read !grep -n "authenticate\|authorize" src/**/*.ts
+```
+
+50 lines. The relevant lines only. Then:
+
+```
+gaip → "is there a path where auth is bypassed?"
+```
+
+500 tokens of context, 100% relevant. Better answer, 30x cheaper.
+
+### "Plan and execute" — agents plan in JSON. You plan in text.
+
+Agent creates a structured plan, then executes steps silently.
+
+You:
+
+```
+<leader>co
+<C-g> → "I need to add OAuth2. What files need to change and in what order?"
+```
+
+Read the plan. Disagree? Say so:
+
+```
+<C-g> → "skip the migration for now, just the middleware"
+```
+
+Now execute yourself, step by step:
+
+```
+gsaf → "add OAuth2 middleware based on our plan"
+:w src/middleware/oauth.ts
+:make
+gcaf
+```
+
+You understood every step. The agent understood none.
+
+### "Conversation memory" — agents store history. You have buffers.
+
+Agents maintain conversation state in a database. You:
+
+```vim
+:w .cogcog/oauth-investigation.md   " save the session
+```
+
+Next week:
+
+```vim
+<leader>co
+:read .cogcog/oauth-investigation.md
+<C-g> → "continuing from last time — did we decide on PKCE?"
+```
+
+Your "memory" is a file. You can grep it, edit it, version it with git. An agent's memory is a black box you can't inspect.
+
+### "Parallel agents" — agents spawn subagents. You have tmux.
+
+In tmux pane 1:
+
+```bash
+cat src/api/*.ts | cogcog --raw "find all N+1 query patterns"
+```
+
+In tmux pane 2:
+
+```bash
+cat src/middleware/*.ts | cogcog --raw "audit auth middleware for bypasses"
+```
+
+In tmux pane 3:
+
+```bash
+git log --oneline --since=7d | cogcog --raw "what shipped this week?"
+```
+
+Three "agents" running in parallel. You read all three results. An orchestrator agent would have summarized away the details.
+
+### "Auto-fix lint errors" — agents fix for you. You have `:cdo`.
+
+```vim
+:make                               " lint errors → quickfix
+:cdo s/var /const /                 " fix all var→const automatically
+```
+
+Need smarter fixes? Generate a script:
+
+```
+<C-g> → "write a vim command that fixes each quickfix entry"
+```
+
+Or per-error:
+
+```vim
+:cfirst
+gaip → "fix this lint error"        " quickfix context auto-included
+:cnext
+gaip → "fix this one too"
+```
+
+### "Summarize PR" — agents read diffs. You pipe them.
+
+```bash
+gh pr diff 42 | cogcog --raw "summarize changes, flag risks"
+```
+
+Or review specific files:
+
+```bash
+gh pr diff 42 -- src/auth/ | cogcog --raw "security review"
+```
+
+### "Dependency audit" — agents read lockfiles. You pipe them too.
+
+```bash
+cat go.sum | cogcog --raw "any packages with known CVEs?"
+npm audit --json 2>/dev/null | cogcog --raw "which of these are actually exploitable in our context?"
+```
+
+### The point
+
+Every "agent feature" is:
+1. A shell command that already exists (grep, git, curl, make)
+2. A vim primitive that already exists (:read, :make, :grep, :cdo, quickfix)
+3. Plus `ga`/`gs`/`gc` to add LLM intelligence on top
+
+The agent wraps these in 15 layers of abstraction, burns 10x the tokens, and hides what's happening. Cogcog gives you the same power with full visibility, in tools you already know.
+
 ### Rubber duck debugging
 
 Open the panel. Explain your bug to the LLM:
