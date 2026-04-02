@@ -1,15 +1,83 @@
 -- cogcog.lua — minimal async bridge to any stdin->stdout LLM
 --
 -- <leader>co  open scratch context buffer
--- <leader>cs  send buffer to LLM, response streams into split
--- <leader>cb  dump all open buffers into context
+-- <leader>ci  inspect sections, jump to one
+-- <leader>cd  delete section under cursor
 -- <leader>ct  dump project tree into context
+-- <leader>cb  dump all open buffers into context
+-- <leader>cs  send buffer to LLM, response streams into split
 
 local cmd = os.getenv("COGCOG_CMD") or "cogcog"
 
 vim.keymap.set("n", "<leader>co", function()
 	vim.cmd("enew | setlocal buftype=nofile ft=markdown")
 end, { desc = "cogcog: open context" })
+
+-- inspect: list all --- sections, jump to selected
+vim.keymap.set("n", "<leader>ci", function()
+	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local sections = {}
+	for i, line in ipairs(lines) do
+		if line:match("^%-%-%- .+ %-%-%-$") then
+			table.insert(sections, { lnum = i, text = line })
+		end
+	end
+	if #sections == 0 then
+		vim.notify("cogcog: no sections found", vim.log.levels.WARN)
+		return
+	end
+	vim.ui.select(sections, {
+		prompt = "Jump to section:",
+		format_item = function(item)
+			return string.format("L%-4d %s", item.lnum, item.text)
+		end,
+	}, function(choice)
+		if choice then
+			vim.api.nvim_win_set_cursor(0, { choice.lnum, 0 })
+			vim.cmd("normal! zt")
+		end
+	end)
+end, { desc = "cogcog: inspect sections" })
+
+-- delete section under cursor (from --- header to next --- header or end)
+vim.keymap.set("n", "<leader>cd", function()
+	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local cur = vim.api.nvim_win_get_cursor(0)[1]
+
+	-- find section start: search backwards for --- header
+	local start = nil
+	for i = cur, 1, -1 do
+		if lines[i]:match("^%-%-%- .+ %-%-%-$") then
+			start = i
+			break
+		end
+	end
+	if not start then
+		vim.notify("cogcog: not in a section", vim.log.levels.WARN)
+		return
+	end
+
+	-- include blank line before header if present
+	if start > 1 and vim.trim(lines[start - 1]) == "" then
+		start = start - 1
+	end
+
+	-- find section end: next --- header or end of buffer
+	local stop = #lines
+	for i = start + 2, #lines do
+		if lines[i]:match("^%-%-%- .+ %-%-%-$") then
+			stop = i - 1
+			-- trim trailing blank line
+			if stop >= start and vim.trim(lines[stop]) == "" then
+				stop = stop - 1
+			end
+			break
+		end
+	end
+
+	vim.api.nvim_buf_set_lines(0, start - 1, stop, false, {})
+	vim.notify("cogcog: deleted " .. (stop - start + 1) .. " lines")
+end, { desc = "cogcog: delete section" })
 
 -- dump all open file buffers into the current buffer
 vim.keymap.set("n", "<leader>cb", function()

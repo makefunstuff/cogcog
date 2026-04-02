@@ -287,3 +287,19 @@ lua/cogcog.lua     # two keymaps for async send
   debug.md         #   debugging template
 README.md
 ```
+
+--- project tree ---
+
+.
+./lua
+./lua/cogcog.lua
+./bin
+./bin/cogcog
+./.git
+./.cogcog
+./.cogcog/system.md
+./.cogcog/review.md
+./.cogcog/explain.md
+./.cogcog/refactor.md
+./.cogcog/debug.md
+./README.md
