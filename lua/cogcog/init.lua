@@ -12,10 +12,29 @@ local job_id = nil
 local cogcog_dir = vim.fn.getcwd() .. "/.cogcog"
 local session_file = cogcog_dir .. "/session.md"
 
+-- state
+local state = "idle" -- idle | thinking | streaming
+local state_start = 0
+
 -- spinner
 local spinner_frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 local spinner_timer = nil
 local spinner_idx = 0
+
+-- highlights
+local ns = vim.api.nvim_create_namespace("cogcog")
+
+local function setup_highlights()
+	vim.api.nvim_set_hl(0, "CogcogSep", { link = "Comment" })
+	vim.api.nvim_set_hl(0, "CogcogSection", { link = "Title" })
+	vim.api.nvim_set_hl(0, "CogcogSpinner", { link = "DiagnosticInfo" })
+	vim.api.nvim_set_hl(0, "CogcogSkill", { link = "DiagnosticOk" })
+	vim.api.nvim_set_hl(0, "CogcogTool", { link = "DiagnosticWarn" })
+	vim.api.nvim_set_hl(0, "CogcogStatus", { link = "Comment" })
+	vim.api.nvim_set_hl(0, "CogcogActive", { link = "DiagnosticInfo" })
+end
+
+setup_highlights()
 
 -- skills and tools
 
@@ -82,6 +101,40 @@ local function ctx_win()
 	return nil
 end
 
+-- dynamic statusline
+
+function _G._cogcog_statusline()
+	local parts = { "%#CogcogActive# cogcog%#CogcogStatus#" }
+
+	if state == "thinking" then
+		local elapsed = math.floor(vim.uv.now() / 1000 - state_start)
+		table.insert(parts, " %#CogcogSpinner#" .. spinner_frames[(spinner_idx % #spinner_frames) + 1] .. " thinking")
+		if elapsed > 0 then table.insert(parts, " " .. elapsed .. "s") end
+		table.insert(parts, "%#CogcogStatus#")
+	elseif state == "streaming" then
+		local elapsed = math.floor(vim.uv.now() / 1000 - state_start)
+		table.insert(parts, " %#CogcogSpinner#▸ streaming")
+		if elapsed > 0 then table.insert(parts, " " .. elapsed .. "s") end
+		table.insert(parts, "%#CogcogStatus#")
+	end
+
+	-- active skills/tools
+	local buf = get_or_create_ctx()
+	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+	local active = {}
+	for _, line in ipairs(lines) do
+		local skill = line:match("^%-%-%- skill:(.+) %-%-%-$")
+		if skill then table.insert(active, "%#CogcogSkill#" .. skill) end
+		local tool = line:match("^%-%-%- tool:(.+) %-%-%-$")
+		if tool then table.insert(active, "%#CogcogTool#" .. tool) end
+	end
+	if #active > 0 then
+		table.insert(parts, " │ " .. table.concat(active, " "))
+	end
+
+	return table.concat(parts)
+end
+
 local function setup_win(w)
 	vim.api.nvim_set_option_value("number", false, { win = w })
 	vim.api.nvim_set_option_value("relativenumber", false, { win = w })
@@ -89,8 +142,28 @@ local function setup_win(w)
 	vim.api.nvim_set_option_value("wrap", true, { win = w })
 	vim.api.nvim_set_option_value("linebreak", true, { win = w })
 	vim.api.nvim_set_option_value("cursorline", false, { win = w })
-	vim.api.nvim_set_option_value("statusline", " cogcog", { win = w })
 	vim.api.nvim_set_option_value("winfixwidth", true, { win = w })
+	vim.api.nvim_set_option_value("statusline", "%{%v:lua._cogcog_statusline()%}", { win = w })
+	vim.api.nvim_set_option_value("conceallevel", 2, { win = w })
+end
+
+local function refresh_statusline()
+	local w = ctx_win()
+	if w then vim.api.nvim_set_option_value("statusline", "%{%v:lua._cogcog_statusline()%}", { win = w }) end
+	-- force redraw so statusline updates while in another window
+	vim.cmd("redrawstatus")
+end
+
+-- global status: use from your own statusline with %{v:lua._cogcog_status()}
+function _G._cogcog_status()
+	if state == "thinking" then
+		local elapsed = math.floor(vim.uv.now() / 1000 - state_start)
+		return spinner_frames[(spinner_idx % #spinner_frames) + 1] .. " cogcog " .. elapsed .. "s"
+	elseif state == "streaming" then
+		local elapsed = math.floor(vim.uv.now() / 1000 - state_start)
+		return "▸ cogcog " .. elapsed .. "s"
+	end
+	return ""
 end
 
 local function show_panel()
@@ -212,17 +285,28 @@ end
 
 vim.api.nvim_create_autocmd("VimLeavePre", { callback = save_session })
 
+-- buffer syntax: highlight section headers and separators
+vim.api.nvim_create_autocmd("BufWinEnter", {
+	callback = function(ev)
+		if not vim.api.nvim_buf_get_name(ev.buf):match("%[cogcog%]$") then return end
+		vim.fn.matchadd("CogcogSection", "^--- \\(skill\\|tool\\):.*---$", 10, -1, { window = 0 })
+		vim.fn.matchadd("CogcogSep", "^---$", 10, -1, { window = 0 })
+		vim.fn.matchadd("CogcogSection", "^--- .*:\\d\\+-\\d\\+ ---$", 10, -1, { window = 0 })
+		vim.fn.matchadd("CogcogSpinner", "^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*$", 10, -1, { window = 0 })
+	end,
+})
+
 -- spinner
 
 local function start_spinner(buf)
+	state = "thinking"
+	state_start = math.floor(vim.uv.now() / 1000)
 	spinner_idx = 0
 	if spinner_timer then spinner_timer:stop() end
 	spinner_timer = vim.uv.new_timer()
 	spinner_timer:start(0, 80, vim.schedule_wrap(function()
 		if not vim.api.nvim_buf_is_valid(buf) or not job_id then
-			if spinner_timer then
-				spinner_timer:stop(); spinner_timer = nil
-			end
+			if spinner_timer then spinner_timer:stop(); spinner_timer = nil end
 			return
 		end
 		spinner_idx = (spinner_idx + 1) % #spinner_frames
@@ -232,13 +316,12 @@ local function start_spinner(buf)
 			vim.api.nvim_buf_set_lines(buf, lc - 1, lc, false,
 				{ spinner_frames[spinner_idx + 1] .. " thinking..." })
 		end
+		refresh_statusline()
 	end))
 end
 
 local function stop_spinner(buf)
-	if spinner_timer then
-		spinner_timer:stop(); spinner_timer = nil
-	end
+	if spinner_timer then spinner_timer:stop(); spinner_timer = nil end
 	if not vim.api.nvim_buf_is_valid(buf) then return end
 	local lc = vim.api.nvim_buf_line_count(buf)
 	local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
@@ -282,6 +365,8 @@ local function send()
 				if not vim.api.nvim_buf_is_valid(ctx) then return end
 				if first_output then
 					stop_spinner(ctx)
+					state = "streaming"
+					refresh_statusline()
 					first_output = false
 				end
 				for i, chunk in ipairs(data) do
@@ -310,6 +395,8 @@ local function send()
 				stop_spinner(ctx)
 				vim.fn.delete(tmp)
 				job_id = nil
+				state = "idle"
+				refresh_statusline()
 				if code == 0 then
 					if vim.api.nvim_buf_is_valid(ctx) then
 						append({ "", "" })
