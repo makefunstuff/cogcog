@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# cogcog — stdin → LLM → stdout
+# That's it. Pipe your context in, get a response out.
+#
+# Usage:
+#   echo "explain this" | cogcog
+#   cat src/main.ts | cogcog
+#   :%!cogcog          (from vim — send whole buffer)
+#   :'<,'>!cogcog      (from vim — send selection)
+#
+# Env:
+#   COGCOG_MODEL    model name    (default: claude-sonnet-4-20250514)
+#   ANTHROPIC_API_KEY  required
+
+set -euo pipefail
+
+MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
+MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "cogcog: ANTHROPIC_API_KEY not set" >&2
+  exit 1
+fi
+
+input="$(cat)"
+
+if [[ -z "$input" ]]; then
+  echo "cogcog: empty input" >&2
+  exit 1
+fi
+
+response=$(jq -n \
+  --arg model "$MODEL" \
+  --argjson max_tokens "$MAX_TOKENS" \
+  --arg content "$input" \
+  '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
+| curl -sf https://api.anthropic.com/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d @- 2>/dev/null)
+
+# check for API errors
+if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
+  echo "cogcog: API error — $(echo "$response" | jq -r '.error.message')" >&2
+  exit 1
+fi
+
+echo "$response" | jq -r '.content[0].text'
