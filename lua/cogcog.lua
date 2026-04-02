@@ -6,11 +6,42 @@
 -- <leader>ct  dump project tree into context
 -- <leader>cb  dump all open buffers into context
 -- <leader>cs  send buffer to LLM, response streams into split
+-- visual <leader>cs  send selection to LLM, response to clipboard
+-- visual <leader>cy  yank selection into context buffer
 
 local cmd = os.getenv("COGCOG_CMD") or "cogcog"
 
+local function get_or_create_ctx()
+	-- find existing [cogcog] buffer
+	for _, b in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog%]$") then
+			return b
+		end
+	end
+	-- create new one
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.bo[buf].filetype = "markdown"
+	vim.bo[buf].buftype = "nofile"
+	vim.api.nvim_buf_set_name(buf, "[cogcog]")
+	return buf
+end
+
+local function focus_ctx()
+	local buf = get_or_create_ctx()
+	-- check if already visible in a window
+	for _, w in ipairs(vim.api.nvim_list_wins()) do
+		if vim.api.nvim_win_get_buf(w) == buf then
+			vim.api.nvim_set_current_win(w)
+			return buf
+		end
+	end
+	vim.cmd("vsplit")
+	vim.api.nvim_win_set_buf(0, buf)
+	return buf
+end
+
 vim.keymap.set("n", "<leader>co", function()
-	vim.cmd("enew | setlocal buftype=nofile ft=markdown")
+	focus_ctx()
 end, { desc = "cogcog: open context" })
 
 -- inspect: list all --- sections, jump to selected
@@ -106,11 +137,39 @@ vim.keymap.set("n", "<leader>ct", function()
 	vim.notify("cogcog: added tree")
 end, { desc = "cogcog: add project tree" })
 
+-- visual: send selection directly to LLM
+vim.keymap.set("v", "<leader>cs", function()
+	local l1 = vim.fn.line("'<")
+	local l2 = vim.fn.line("'>")
+	local lines = vim.api.nvim_buf_get_lines(0, l1 - 1, l2, false)
+	local input = table.concat(lines, "\n")
+	if vim.trim(input) == "" then return end
+	vim.fn.setreg("+", vim.fn.system(cmd, input))
+	vim.notify("cogcog: response in clipboard")
+end, { desc = "cogcog: send selection" })
+
+-- visual: yank selection into context buffer
+vim.keymap.set("v", "<leader>cy", function()
+	local buf = vim.api.nvim_get_current_buf()
+	local name = vim.api.nvim_buf_get_name(buf)
+	if name == "" then name = "buffer" end
+	local l1 = vim.fn.line("'<")
+	local l2 = vim.fn.line("'>")
+	local lines = vim.api.nvim_buf_get_lines(buf, l1 - 1, l2, false)
+	local ctx = get_or_create_ctx()
+
+	local header = { "", "--- " .. name .. ":" .. l1 .. "-" .. l2 .. " ---", "" }
+	vim.api.nvim_buf_set_lines(ctx, -1, -1, false, header)
+	vim.api.nvim_buf_set_lines(ctx, -1, -1, false, lines)
+	vim.notify("cogcog: yanked " .. (l2 - l1 + 1) .. " lines to context")
+end, { desc = "cogcog: yank to context" })
+
 vim.keymap.set("n", "<leader>cs", function()
-	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local ctx = get_or_create_ctx()
+	local lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
 	local input = table.concat(lines, "\n")
 	if vim.trim(input) == "" then
-		vim.notify("cogcog: empty", vim.log.levels.WARN)
+		vim.notify("cogcog: context buffer is empty — use <leader>cy to yank code into it", vim.log.levels.WARN)
 		return
 	end
 

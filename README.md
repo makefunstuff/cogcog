@@ -66,12 +66,16 @@ Without the plugin, same thing with native vim:
 :%!cogcog
 ```
 
-| Keymap | What it does |
-|--------|-------------|
-| `<leader>co` | Open scratch context buffer |
-| `<leader>ct` | Add project tree to context |
-| `<leader>cb` | Add all open buffers to context |
-| `<leader>cs` | Send buffer to LLM, response in split |
+| Keymap | Mode | What it does |
+|--------|------|-------------|
+| `<leader>co` | normal | Open scratch context buffer |
+| `<leader>ci` | normal | Inspect sections, jump to one |
+| `<leader>cd` | normal | Delete section under cursor |
+| `<leader>ct` | normal | Add project tree to context |
+| `<leader>cb` | normal | Add all open buffers to context |
+| `<leader>cs` | normal | Send buffer to LLM, response in split |
+| `<leader>cs` | visual | Send selection to LLM, response to clipboard |
+| `<leader>cy` | visual | Yank selection into context buffer |
 
 ## Context templates
 
