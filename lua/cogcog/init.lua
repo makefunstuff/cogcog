@@ -418,7 +418,7 @@ vim.keymap.set("n", "<leader>co", function()
 end, { desc = "cogcog: toggle panel" })
 
 -- gc: check — send buffer/selection to cloud model for verification
-local checker_cmd = "pi -p --provider ollama-cloud --model kimi-k2.5"
+local checker_cmd = "pi -p --provider anthropic --model opus:xhigh"
 
 local function check_send(code_lines, source)
 	local input = {
