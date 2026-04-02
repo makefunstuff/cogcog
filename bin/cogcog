@@ -24,7 +24,10 @@
 set -euo pipefail
 
 # delegate to another CLI if COGCOG_CMD is set
-if [[ -n "${COGCOG_CMD:-}" ]]; then
+# pass --raw to bypass and use the built-in API client
+if [[ "${1:-}" == "--raw" ]]; then
+  shift
+elif [[ -n "${COGCOG_CMD:-}" ]]; then
   exec $COGCOG_CMD "$@"
 fi
 

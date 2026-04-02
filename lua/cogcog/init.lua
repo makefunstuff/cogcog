@@ -25,13 +25,18 @@ local spinner_idx = 0
 local ns = vim.api.nvim_create_namespace("cogcog")
 
 local function setup_highlights()
-	vim.api.nvim_set_hl(0, "CogcogSep", { link = "Comment" })
-	vim.api.nvim_set_hl(0, "CogcogSection", { link = "Title" })
-	vim.api.nvim_set_hl(0, "CogcogSpinner", { link = "DiagnosticInfo" })
-	vim.api.nvim_set_hl(0, "CogcogSkill", { link = "DiagnosticOk" })
-	vim.api.nvim_set_hl(0, "CogcogTool", { link = "DiagnosticWarn" })
-	vim.api.nvim_set_hl(0, "CogcogStatus", { link = "Comment" })
-	vim.api.nvim_set_hl(0, "CogcogActive", { link = "DiagnosticInfo" })
+	local highlights = {
+		CogcogSep = "Comment",
+		CogcogSection = "Title",
+		CogcogSpinner = "DiagnosticInfo",
+		CogcogSkill = "DiagnosticOk",
+		CogcogTool = "DiagnosticWarn",
+		CogcogStatus = "Comment",
+		CogcogActive = "DiagnosticInfo",
+	}
+	for name, link in pairs(highlights) do
+		vim.api.nvim_set_hl(0, name, { link = link })
+	end
 end
 
 setup_highlights()
@@ -198,6 +203,10 @@ local function append(lines)
 	vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
 end
 
+local function strip_ansi(s)
+	return s:gsub("\27%[[%d;]*m", "")
+end
+
 local function scroll_bottom()
 	local w = ctx_win()
 	if not w then return end
@@ -292,7 +301,7 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
 		vim.fn.matchadd("CogcogSection", "^--- \\(skill\\|tool\\):.*---$", 10, -1, { window = 0 })
 		vim.fn.matchadd("CogcogSep", "^---$", 10, -1, { window = 0 })
 		vim.fn.matchadd("CogcogSection", "^--- .*:\\d\\+-\\d\\+ ---$", 10, -1, { window = 0 })
-		vim.fn.matchadd("CogcogSpinner", "^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*$", 10, -1, { window = 0 })
+		vim.fn.matchadd("CogcogSpinner", "^\\(⠋\\|⠙\\|⠹\\|⠸\\|⠼\\|⠴\\|⠦\\|⠧\\|⠇\\|⠏\\).*$", 10, -1, { window = 0 })
 	end,
 })
 
@@ -304,7 +313,7 @@ local function start_spinner(buf)
 	spinner_idx = 0
 	if spinner_timer then spinner_timer:stop() end
 	spinner_timer = vim.uv.new_timer()
-	spinner_timer:start(0, 80, vim.schedule_wrap(function()
+	spinner_timer:start(0, 200, vim.schedule_wrap(function()
 		if not vim.api.nvim_buf_is_valid(buf) or not job_id then
 			if spinner_timer then spinner_timer:stop(); spinner_timer = nil end
 			return
@@ -354,10 +363,13 @@ local function send()
 	scroll_bottom()
 	start_spinner(ctx)
 
-	local shell_cmd = "cogcog < " .. vim.fn.shellescape(tmp)
+	-- --raw bypasses COGCOG_CMD (opencode/agent), hits API directly = fast
+	local cogcog_bin = vim.fn.exepath("cogcog")
+	if cogcog_bin == "" then cogcog_bin = "cogcog" end
+	local shell_cmd = cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp)
 	local first_output = true
 
-	job_id = vim.fn.jobstart({ "bash", "-lc", shell_cmd }, {
+	job_id = vim.fn.jobstart({ "bash", "-c", shell_cmd }, {
 		stdout_buffered = false,
 		on_stdout = function(_, data)
 			if not data then return end
@@ -370,6 +382,7 @@ local function send()
 					first_output = false
 				end
 				for i, chunk in ipairs(data) do
+					chunk = strip_ansi(chunk)
 					local lc = vim.api.nvim_buf_line_count(ctx)
 					if i == 1 then
 						local last = vim.api.nvim_buf_get_lines(ctx, lc - 1, lc, false)[1] or ""
@@ -429,6 +442,27 @@ end
 
 -- ask: prompt for question, optionally with selection, then send
 
+-- gather quickfix entries as context (diagnostics, grep results, build errors)
+local function gather_quickfix()
+	local qf = vim.fn.getqflist()
+	if #qf == 0 then return {} end
+	local lines = { "--- quickfix (" .. #qf .. " items) ---", "" }
+	local seen = {}
+	for _, item in ipairs(qf) do
+		if item.bufnr > 0 and item.lnum > 0 then
+			local fname = relative_name(vim.api.nvim_buf_get_name(item.bufnr))
+			local key = fname .. ":" .. item.lnum
+			if not seen[key] then
+				seen[key] = true
+				local text = item.text or ""
+				table.insert(lines, fname .. ":" .. item.lnum .. ": " .. vim.trim(text))
+			end
+		end
+	end
+	table.insert(lines, "")
+	return lines
+end
+
 local function ask(with_selection)
 	local sel_lines, sel_name, sel_range
 	if with_selection then
@@ -440,6 +474,14 @@ local function ask(with_selection)
 
 	vim.ui.input({ prompt = " ask: " }, function(question)
 		if not question or vim.trim(question) == "" then return end
+
+		-- auto-append quickfix if non-empty
+		local qf = gather_quickfix()
+		if #qf > 0 then
+			append({ "" })
+			append(qf)
+		end
+
 		if sel_lines then
 			append({ "", "--- " .. sel_name .. ":" .. sel_range .. " ---", "" })
 			append(sel_lines)
@@ -556,6 +598,123 @@ vim.keymap.set("n", "<leader>cl", function()
 		scroll_bottom()
 	end)
 end, { desc = "cogcog: skills/tools" })
+
+-- slopgen: generate code into a fresh buffer
+
+local function slopgen(code_lines, source_name)
+	vim.ui.input({ prompt = " gen: " }, function(instruction)
+		if not instruction or vim.trim(instruction) == "" then return end
+
+		local input = {}
+		if code_lines and #code_lines > 0 then
+			table.insert(input, "--- " .. (source_name or "code") .. " ---")
+			table.insert(input, "")
+			for _, l in ipairs(code_lines) do table.insert(input, l) end
+			table.insert(input, "")
+		end
+
+		-- include planning context if it exists
+		local ctx = get_or_create_ctx()
+		local ctx_lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
+		local ctx_text = vim.trim(table.concat(ctx_lines, "\n"))
+		if ctx_text ~= "" then
+			table.insert(input, "--- context ---")
+			table.insert(input, "")
+			for _, l in ipairs(ctx_lines) do table.insert(input, l) end
+			table.insert(input, "")
+		end
+
+		table.insert(input, instruction)
+		table.insert(input, "")
+		table.insert(input, "Output only the code. No explanations unless asked.")
+
+		-- create output buffer
+		local out_buf = vim.api.nvim_create_buf(false, true)
+		vim.bo[out_buf].buftype = "nofile"
+		vim.bo[out_buf].filetype = "markdown"
+		vim.api.nvim_buf_set_name(out_buf, "[cogcog-gen]")
+		vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, { spinner_frames[1] .. " generating..." })
+
+		-- open in a split below
+		vim.cmd("botright split")
+		local out_win = vim.api.nvim_get_current_win()
+		vim.api.nvim_win_set_buf(out_win, out_buf)
+		vim.api.nvim_set_option_value("number", false, { win = out_win })
+		vim.api.nvim_set_option_value("signcolumn", "no", { win = out_win })
+		vim.api.nvim_set_option_value("wrap", true, { win = out_win })
+		vim.api.nvim_set_option_value("statusline", " cogcog gen", { win = out_win })
+
+		-- write input to tmp, send
+		local tmp = vim.fn.tempname()
+		vim.fn.writefile(input, tmp)
+
+		local cogcog_bin = vim.fn.exepath("cogcog")
+		if cogcog_bin == "" then cogcog_bin = "cogcog" end
+		local shell_cmd = cogcog_bin .. " < " .. vim.fn.shellescape(tmp)
+		local first = true
+
+		vim.fn.jobstart({ "bash", "-c", shell_cmd }, {
+			stdout_buffered = false,
+			on_stdout = function(_, data)
+				if not data then return end
+				vim.schedule(function()
+					if not vim.api.nvim_buf_is_valid(out_buf) then return end
+					if first then
+						vim.api.nvim_buf_set_lines(out_buf, 0, -1, false, { "" })
+						first = false
+					end
+					for i, chunk in ipairs(data) do
+						chunk = strip_ansi(chunk)
+						local lc = vim.api.nvim_buf_line_count(out_buf)
+						if i == 1 then
+							local last = vim.api.nvim_buf_get_lines(out_buf, lc - 1, lc, false)[1] or ""
+							vim.api.nvim_buf_set_lines(out_buf, lc - 1, lc, false, { last .. chunk })
+						else
+							vim.api.nvim_buf_set_lines(out_buf, lc, lc, false, { chunk })
+						end
+					end
+					-- auto-scroll
+					if vim.api.nvim_win_is_valid(out_win) then
+						vim.api.nvim_win_set_cursor(out_win, { vim.api.nvim_buf_line_count(out_buf), 0 })
+					end
+				end)
+			end,
+			on_exit = function(_, code)
+				vim.schedule(function()
+					vim.fn.delete(tmp)
+					if code ~= 0 then
+						vim.notify("cogcog gen: exit " .. code, vim.log.levels.ERROR)
+					end
+				end)
+			end,
+		})
+	end)
+end
+
+-- gs operator: gs{motion}
+function _G._cogcog_slopgen_opfunc(type)
+	local start_pos = vim.api.nvim_buf_get_mark(0, "[")
+	local end_pos = vim.api.nvim_buf_get_mark(0, "]")
+	local lines = vim.api.nvim_buf_get_lines(0, start_pos[1] - 1, end_pos[1], false)
+	if #lines == 0 then return end
+	local name = relative_name(vim.api.nvim_buf_get_name(0))
+	slopgen(lines, name .. ":" .. start_pos[1] .. "-" .. end_pos[1])
+end
+
+vim.keymap.set("n", "gs", function()
+	vim.o.operatorfunc = "v:lua._cogcog_slopgen_opfunc"
+	return "g@"
+end, { expr = true, desc = "cogcog: generate from {motion}" })
+
+vim.keymap.set("v", "gs", function()
+	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+	vim.schedule(function()
+		local name = relative_name(vim.api.nvim_buf_get_name(0))
+		local l1, l2 = vim.fn.line("'<"), vim.fn.line("'>")
+		local lines = vim.api.nvim_buf_get_lines(0, l1 - 1, l2, false)
+		slopgen(lines, name .. ":" .. l1 .. "-" .. l2)
+	end)
+end, { desc = "cogcog: generate from selection" })
 
 -- clear
 vim.keymap.set("n", "<leader>cc", function()
