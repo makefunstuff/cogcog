@@ -2,17 +2,41 @@
 --
 -- <leader>co  open scratch context buffer
 -- <leader>cs  send buffer to LLM, response streams into split
---
--- build context with native vim:
---   :read src/main.ts          add a file
---   :read !git log -10         add command output
---   :'<,'>y then paste         add a selection
+-- <leader>cb  dump all open buffers into context
+-- <leader>ct  dump project tree into context
 
 local cmd = os.getenv("COGCOG_CMD") or "cogcog"
 
 vim.keymap.set("n", "<leader>co", function()
 	vim.cmd("enew | setlocal buftype=nofile ft=markdown")
 end, { desc = "cogcog: open context" })
+
+-- dump all open file buffers into the current buffer
+vim.keymap.set("n", "<leader>cb", function()
+	local current = vim.api.nvim_get_current_buf()
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if buf ~= current and vim.api.nvim_buf_is_loaded(buf) then
+			local name = vim.api.nvim_buf_get_name(buf)
+			if name ~= "" and vim.bo[buf].buftype == "" then
+				local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+				local header = { "", "--- " .. name .. " ---", "" }
+				vim.api.nvim_buf_set_lines(current, -1, -1, false, header)
+				vim.api.nvim_buf_set_lines(current, -1, -1, false, lines)
+			end
+		end
+	end
+	vim.notify("cogcog: added open buffers")
+end, { desc = "cogcog: add open buffers" })
+
+-- dump project tree into the current buffer
+vim.keymap.set("n", "<leader>ct", function()
+	local output = vim.fn.systemlist("tree -I 'node_modules|.git|__pycache__|.next|dist|build' --noreport -L 4 2>/dev/null || find . -maxdepth 4 -not -path '*/.git/*' -not -path '*/node_modules/*' | head -80")
+	local header = { "", "--- project tree ---", "" }
+	local current = vim.api.nvim_get_current_buf()
+	vim.api.nvim_buf_set_lines(current, -1, -1, false, header)
+	vim.api.nvim_buf_set_lines(current, -1, -1, false, output)
+	vim.notify("cogcog: added tree")
+end, { desc = "cogcog: add project tree" })
 
 vim.keymap.set("n", "<leader>cs", function()
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)

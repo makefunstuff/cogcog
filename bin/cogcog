@@ -9,19 +9,25 @@
 #   :'<,'>!cogcog      (from vim — send selection)
 #
 # Env:
-#   COGCOG_MODEL      model name       (default: claude-sonnet-4-20250514)
+#   COGCOG_CMD         delegate to another CLI (e.g. "claude -p", "opencode run")
+#   COGCOG_MODEL       model name       (default: claude-sonnet-4-20250514)
 #   COGCOG_MAX_TOKENS  max tokens       (default: 8192)
 #   COGCOG_SYSTEM      system prompt    (optional)
-#   ANTHROPIC_API_KEY  required
+#   ANTHROPIC_API_KEY  required (unless COGCOG_CMD is set)
 
 set -euo pipefail
+
+# delegate to another CLI if COGCOG_CMD is set
+if [[ -n "${COGCOG_CMD:-}" ]]; then
+  exec $COGCOG_CMD "$@"
+fi
 
 MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
 SYSTEM="${COGCOG_SYSTEM:-}"
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "cogcog: ANTHROPIC_API_KEY not set" >&2
+  echo "cogcog: ANTHROPIC_API_KEY not set (or set COGCOG_CMD to use another backend)" >&2
   exit 1
 fi
 
