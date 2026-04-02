@@ -9,41 +9,106 @@
 #   :'<,'>!cogcog      (from vim — send selection)
 #
 # Env:
-#   COGCOG_MODEL    model name    (default: claude-sonnet-4-20250514)
+#   COGCOG_MODEL      model name       (default: claude-sonnet-4-20250514)
+#   COGCOG_MAX_TOKENS  max tokens       (default: 8192)
+#   COGCOG_SYSTEM      system prompt    (optional)
 #   ANTHROPIC_API_KEY  required
 
 set -euo pipefail
 
 MODEL="${COGCOG_MODEL:-claude-sonnet-4-20250514}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
+SYSTEM="${COGCOG_SYSTEM:-}"
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "cogcog: ANTHROPIC_API_KEY not set" >&2
   exit 1
 fi
 
-input="$(cat)"
+# read stdin to temp file to avoid bash variable size limits
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
 
-if [[ -z "$input" ]]; then
+if [[ ! -s "$tmp" ]]; then
   echo "cogcog: empty input" >&2
   exit 1
 fi
 
-response=$(jq -n \
-  --arg model "$MODEL" \
-  --argjson max_tokens "$MAX_TOKENS" \
-  --arg content "$input" \
-  '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
-| curl -sf https://api.anthropic.com/v1/messages \
+input=$(<"$tmp")
+
+# build request body
+if [[ -n "$SYSTEM" ]]; then
+  body=$(jq -n \
+    --arg model "$MODEL" \
+    --argjson max_tokens "$MAX_TOKENS" \
+    --arg system "$SYSTEM" \
+    --arg content "$input" \
+    '{model: $model, max_tokens: $max_tokens, system: $system, stream: true,
+      messages: [{role: "user", content: $content}]}')
+else
+  body=$(jq -n \
+    --arg model "$MODEL" \
+    --argjson max_tokens "$MAX_TOKENS" \
+    --arg content "$input" \
+    '{model: $model, max_tokens: $max_tokens, stream: true,
+      messages: [{role: "user", content: $content}]}')
+fi
+
+# stream response — show chunks as they arrive
+curl -sS -w '\n%{http_code}' https://api.anthropic.com/v1/messages \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
-  -d @- 2>/dev/null)
+  -d "$body" 2>/dev/null \
+| {
+  output=""
+  http_code=""
+  while IFS= read -r line; do
+    # last line is the http status code from -w
+    if [[ "$line" =~ ^[0-9]{3}$ ]]; then
+      http_code="$line"
+      continue
+    fi
 
-# check for API errors
-if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
-  echo "cogcog: API error — $(echo "$response" | jq -r '.error.message')" >&2
-  exit 1
-fi
+    # skip SSE prefixes and empty lines
+    line="${line#data: }"
+    [[ -z "$line" ]] && continue
+    [[ "$line" == "event:"* ]] && continue
 
-echo "$response" | jq -r '.content[0].text'
+    # extract text deltas
+    type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null) || continue
+
+    case "$type" in
+      content_block_delta)
+        chunk=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
+        if [[ -n "$chunk" ]]; then
+          printf '%s' "$chunk"
+          output+="$chunk"
+        fi
+        ;;
+      error)
+        msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+        echo "cogcog: API error — $msg" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # trailing newline
+  [[ -n "$output" ]] && echo
+
+  # check http status
+  if [[ "$http_code" != "200" && -n "$http_code" ]]; then
+    # non-streaming error (auth, rate limit, etc.)
+    if [[ -z "$output" ]]; then
+      echo "cogcog: HTTP $http_code" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "$output" ]]; then
+    echo "cogcog: empty response" >&2
+    exit 1
+  fi
+}

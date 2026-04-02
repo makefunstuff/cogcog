@@ -1,7 +1,7 @@
 -- cogcog.lua — minimal async bridge to any stdin->stdout LLM
 --
 -- <leader>co  open scratch context buffer
--- <leader>cs  send buffer to LLM, response in split
+-- <leader>cs  send buffer to LLM, response streams into split
 --
 -- build context with native vim:
 --   :read src/main.ts          add a file
@@ -22,14 +22,36 @@ vim.keymap.set("n", "<leader>cs", function()
 		return
 	end
 
-	vim.notify("cogcog: sending " .. #lines .. " lines...")
-	local chunks = {}
+	-- create response buffer immediately so you see streaming output
+	local resp_buf = vim.api.nvim_create_buf(false, true)
+	vim.cmd("split")
+	vim.api.nvim_win_set_buf(0, resp_buf)
+	vim.bo[resp_buf].filetype = "markdown"
+	vim.bo[resp_buf].buftype = "nofile"
+	vim.api.nvim_buf_set_name(resp_buf, "[cogcog-response]")
+	vim.api.nvim_buf_set_lines(resp_buf, 0, -1, false, { "cogcog: waiting..." })
+
+	local partial = ""
 
 	local id = vim.fn.jobstart(cmd, {
-		stdout_buffered = true,
 		on_stdout = function(_, data)
-			if data then
-				vim.list_extend(chunks, data)
+			if not data then return end
+			for i, chunk in ipairs(data) do
+				if i == 1 then
+					partial = partial .. chunk
+				else
+					vim.schedule(function()
+						if not vim.api.nvim_buf_is_valid(resp_buf) then return end
+						local lc = vim.api.nvim_buf_line_count(resp_buf)
+						-- first chunk replaces the "waiting..." line
+						if lc == 1 and vim.api.nvim_buf_get_lines(resp_buf, 0, 1, false)[1] == "cogcog: waiting..." then
+							vim.api.nvim_buf_set_lines(resp_buf, 0, 1, false, { partial })
+						else
+							vim.api.nvim_buf_set_lines(resp_buf, lc - 1, lc, false, { partial })
+						end
+					end)
+					partial = chunk
+				end
 			end
 		end,
 		on_stderr = function(_, data)
@@ -44,23 +66,20 @@ vim.keymap.set("n", "<leader>cs", function()
 		end,
 		on_exit = function(_, code)
 			vim.schedule(function()
+				if not vim.api.nvim_buf_is_valid(resp_buf) then return end
 				if code ~= 0 then
 					vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
 					return
 				end
-				while #chunks > 0 and chunks[#chunks] == "" do
-					table.remove(chunks)
+				-- flush remaining partial line
+				if partial ~= "" then
+					local lc = vim.api.nvim_buf_line_count(resp_buf)
+					if lc == 1 and vim.api.nvim_buf_get_lines(resp_buf, 0, 1, false)[1] == "cogcog: waiting..." then
+						vim.api.nvim_buf_set_lines(resp_buf, 0, 1, false, { partial })
+					else
+						vim.api.nvim_buf_set_lines(resp_buf, lc - 1, lc, false, { partial })
+					end
 				end
-				if #chunks == 0 then
-					vim.notify("cogcog: empty response", vim.log.levels.WARN)
-					return
-				end
-				local buf = vim.api.nvim_create_buf(false, true)
-				vim.cmd("split")
-				vim.api.nvim_win_set_buf(0, buf)
-				vim.bo[buf].filetype = "markdown"
-				vim.bo[buf].buftype = "nofile"
-				vim.api.nvim_buf_set_lines(buf, 0, -1, false, chunks)
 				vim.notify("cogcog: done")
 			end)
 		end,
