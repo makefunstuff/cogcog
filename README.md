@@ -9,7 +9,7 @@ LLM as a vim verb.
 ```
 gaf  → "what does this function do?"     instant answer, stay in your code
 gsaf → "add error handling"              generates code in a new buffer
-graf → "simplify this"                   refactors code in-place (undo with u)
+<leader>graf → "simplify this"                   refactors code in-place (undo with u)
 <leader>gcaf                             deep verification with strongest model
 <C-g> → "let's design the auth flow"    agentic planning (reads files, uses tools)
 <leader>cd                               maps entire project by domain
@@ -24,11 +24,11 @@ graf → "simplify this"                   refactors code in-place (undo with u)
 | `gr` | refactor in-place | replaces your code (undo with `u`) |
 | `<leader>gc` | verify / review | review in side split |
 
-All compose with motions: `gaip`, `gsaf`, `graf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
+All compose with motions: `gaip`, `gsaf`, `<leader>graf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
 
 With just `ANTHROPIC_API_KEY`, all verbs work. Configure separate backends for cost optimization as needed.
 
-> **Note:** `ga` overrides vim's show-ASCII, `gs` overrides sleep, `gr` overrides replace-char, `<C-g>` overrides show-file-info. These are deliberate tradeoffs.
+> **Note:** `ga` overrides vim's show-ASCII, `gs` overrides sleep, `<C-g>` overrides show-file-info. These are deliberate tradeoffs.
 
 ## Workflows
 
@@ -56,8 +56,8 @@ Agent backend with tool calls and web search. Output auto-detects language, stri
 ### Refactor (`gr`) — in-place rewrite
 
 ```
-graf        → "simplify this function"
-grip        → "convert to async/await"
+<leader>graf        → "simplify this function"
+<leader>grip        → "convert to async/await"
 Visual gr   → "add type annotations"
 ```
 
@@ -147,8 +147,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `gs{motion}` | normal | generate from text object |
 | `gss` | normal | generate from entire buffer |
 | `gs` | visual | generate from selection |
-| `gr{motion}` | normal | refactor in-place |
-| `gr` | visual | refactor selection in-place |
+| `<leader>gr{motion}` | normal | refactor in-place |
+| `<leader>gr` | visual | refactor selection in-place |
 | `<leader>gc{motion}` | normal | check text object |
 | `<leader>gc` | visual | check selection |
 | `<C-g>` | normal | plan (agentic, has tools) |

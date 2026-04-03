@@ -92,7 +92,14 @@ local function stream_to_buf(lines, buf, opts)
       if not data then return end
       local msg = vim.trim(table.concat(data, "\n"))
       msg = strip_ansi(msg)
-      if msg == "" or msg:match("^> build") or msg:match("^%s*$") then return end
+      if msg == "" or msg:match("^%s*$") then return end
+      -- filter agent progress (tool calls, build lines, status updates)
+      local noise = { "^> build", "^⚙", "^✓", "^✗", "^�", "^reading", "^writing",
+        "^running", "^searching", "^tool", "^Tool", "^edit", "^Edit",
+        "^bash", "^Bash", "^read", "^Read", "^write", "^Write" }
+      for _, pat in ipairs(noise) do
+        if msg:match(pat) then return end
+      end
       vim.schedule(function()
         vim.notify("cogcog: " .. msg:sub(1, 200), vim.log.levels.ERROR)
       end)
@@ -128,7 +135,7 @@ local function stream_to_buf(lines, buf, opts)
     on_exit = function(_, code)
       vim.schedule(function()
         vim.fn.delete(tmp)
-        active_jobs[job] = nil
+        if job then active_jobs[job] = nil end
         if code ~= 0 then
           vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
         else
@@ -398,7 +405,10 @@ local function refactor_prepare_input(lines, source, instruction)
   table.insert(input, "")
   table.insert(input, instruction)
   table.insert(input, "")
-  table.insert(input, "Output ONLY the refactored code. No explanations, no markdown fences, no backticks.")
+  table.insert(input, "Rewrite the text above according to the instruction.")
+  table.insert(input, "Output ONLY the rewritten content. No explanations, no commentary.")
+  table.insert(input, "If the input is code, output code. If prose, output prose. Match the format.")
+  table.insert(input, "Do NOT refuse. Do NOT say you cannot. Just rewrite it.")
   return input
 end
 
@@ -407,6 +417,8 @@ local function refactor_do(lines, source, instruction, l1, l2)
   local tmp = vim.fn.tempname()
   vim.fn.writefile(input, tmp)
   vim.notify("cogcog: refactoring...", vim.log.levels.INFO)
+
+  local original = vim.deepcopy(lines)
 
   vim.fn.jobstart({ "bash", "-c", cogcog_bin .. " --raw < " .. shell_escape(tmp) }, {
     stdout_buffered = true,
@@ -418,8 +430,14 @@ local function refactor_do(lines, source, instruction, l1, l2)
           vim.notify("cogcog: empty result", vim.log.levels.WARN)
           return
         end
+        -- sanity check: if result is way shorter and looks like a refusal, abort
+        local result_text = table.concat(result, " ")
+        if #result <= 2 and (result_text:match("I do not") or result_text:match("I cannot") or result_text:match("I can't")) then
+          vim.notify("cogcog: model refused, original preserved", vim.log.levels.WARN)
+          return
+        end
         vim.api.nvim_buf_set_lines(0, l1 - 1, l2, false, result)
-        vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines")
+        vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
       end)
     end,
     on_exit = function() vim.schedule(function() vim.fn.delete(tmp) end) end,
@@ -574,11 +592,11 @@ vim.keymap.set("n", "gss", function()
   if #lines > 0 then gen(lines, relative_name(vim.api.nvim_buf_get_name(0))) end
 end, { desc = "cogcog: generate from buffer" })
 
-vim.keymap.set("n", "gr", function()
+vim.keymap.set("n", "<leader>gr", function()
   vim.o.operatorfunc = "v:lua._cogcog_refactor_op"
   return "g@"
 end, { expr = true, desc = "cogcog: refactor {motion}" })
-vim.keymap.set("v", "gr", function()
+vim.keymap.set("v", "<leader>gr", function()
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
   vim.schedule(function()
     local lines, name, l1, l2 = get_visual_selection()
