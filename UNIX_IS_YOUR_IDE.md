@@ -817,6 +817,123 @@ Or in Neovim — pin everything and ask:
 <C-g> → "I'm stuck. what's wrong?"
 ```
 
+## Beyond code
+
+### Personal finance
+
+```bash
+# analyze bank statement
+cat ~/downloads/bank-export.csv | llm "categorize transactions. where am I overspending?"
+
+# compare months
+diff <(grep "2026-02" transactions.csv) <(grep "2026-03" transactions.csv) \
+| llm "how did my spending change between February and March?"
+```
+
+### Cooking
+
+```bash
+# what can I make with what I have?
+echo "eggs, rice, soy sauce, garlic, green onions, sesame oil" \
+| llm "3 recipes I can make right now. quick, no extra ingredients."
+
+# scale a recipe
+cat recipe.md | llm "scale from 4 to 7 servings. show exact quantities."
+```
+
+### Travel planning
+
+```bash
+# research a destination
+pi-ask "best time to visit Tbilisi, Georgia. local food, budget tips" > /tmp/trip.md
+
+# generate an itinerary
+echo "5 days in Tbilisi, interested in food, architecture, wine regions, hiking. budget traveler." \
+| llm "day-by-day itinerary with specific places, times, and cost estimates"
+```
+
+### Writing
+
+```bash
+# brainstorm
+echo "I want to write a blog post about why local LLMs matter for privacy" \
+| llm "give me 5 angles I could take. one sentence each."
+
+# draft → edit loop
+cat draft.md | llm "edit for clarity. cut fluff. keep my voice." > draft-v2.md
+diff draft.md draft-v2.md | llm "explain what you changed and why"
+
+# translate
+cat post-en.md | llm "translate to Estonian. natural, not robotic." > post-et.md
+```
+
+### Email drafting
+
+```bash
+echo "declining a meeting politely. I'm overcommitted this week. suggest next week instead." \
+| llm "write a short professional email"
+
+# reply to a long thread
+pbpaste | llm "summarize this email thread in 3 bullets. draft a reply that addresses the main ask."
+```
+
+### Home network
+
+```bash
+# audit your network
+nmap -sn 192.168.1.0/24 | llm "list all devices. anything unexpected?"
+
+# check DNS
+dig +short example.com A AAAA MX | llm "is my DNS healthy?"
+
+# wifi diagnostics
+iwconfig 2>/dev/null | llm "is my wifi connection good? what could improve?"
+```
+
+### Health & fitness
+
+```bash
+# analyze workout log
+cat ~/vault/fitness/2026-04.md | llm "trends in my training this month. am I overtraining any muscle group?"
+
+# meal planning
+echo "goal: 2200 cal/day, high protein, vegetarian. make a 5-day meal plan." | llm
+```
+
+### Learning a language
+
+```bash
+# practice
+echo "I'm learning Estonian. Quiz me on 10 common phrases. give the phrase, I'll try to translate." | llm
+
+# analyze text
+cat estonian-article.txt | llm "list words I should learn, with translations. group by difficulty."
+```
+
+### Journaling
+
+```bash
+# evening reflection
+echo "Today I worked on cogcog, debugged streaming issues, went for a run." \
+| llm "turn this into a reflective journal entry. what went well, what to improve."
+
+# weekly themes
+cat ~/vault/daily/2026-04-{01..07}.md 2>/dev/null \
+| llm "what themes emerged this week? what should I focus on next week?"
+```
+
+### Household
+
+```bash
+# moving checklist
+echo "moving apartment in Tallinn, 2 weeks from now" \
+| llm "checklist: what to do this week, next week, and moving day. Estonia-specific (Eesti Energia, Telia, address change)"
+
+# compare products
+echo "need a robot vacuum. apartment 65sqm, one cat, hardwood floors. budget 300-500 EUR" \
+| llm "top 3 options available in Estonia. pros/cons table."
+```
+
 ## Why this works
 
 The LLM is a Unix filter. It reads text, processes it, writes text. Every layer between you and the answer costs latency, tokens, money, opacity, and fragility.
