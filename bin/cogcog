@@ -128,61 +128,33 @@ case "$BACKEND" in
 esac
 
 # stream response
-curl -sS -w '\n%{http_code}' "$API_URL" \
+# each SSE data line is valid JSON on ONE line (the spec guarantees this)
+# but jq -r decodes \n escapes into real newlines which we want to preserve
+case "$BACKEND" in
+  anthropic)
+    jq_filter='select(.type == "content_block_delta") | .delta.text // empty'
+    jq_err='select(.type == "error") | .error.message // "unknown error"'
+    ;;
+  openai)
+    jq_filter='.choices[0].delta.content // empty'
+    jq_err='empty'
+    ;;
+esac
+
+curl -sS -N "$API_URL" \
   "${curl_args[@]}" \
   -H "content-type: application/json" \
   -d "$body" 2>/dev/null \
+| sed -n -u 's/^data: //p' \
+| grep -v --line-buffered '^\[DONE\]$' \
+| jq -j --unbuffered -r "$jq_filter" 2>/dev/null \
 | {
   output=""
-  http_code=""
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^[0-9]{3}$ ]]; then
-      http_code="$line"
-      continue
-    fi
-
-    line="${line#data: }"
-    [[ -z "$line" ]] && continue
-    [[ "$line" == "event:"* ]] && continue
-    [[ "$line" == "[DONE]" ]] && continue
-
-    case "$BACKEND" in
-      anthropic)
-        type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null) || continue
-        case "$type" in
-          content_block_delta)
-            chunk=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
-            if [[ -n "$chunk" ]]; then
-              printf '%s' "$chunk"
-              output+="$chunk"
-            fi
-            ;;
-          error)
-            msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
-            echo "cogcog: API error — $msg" >&2
-            exit 1
-            ;;
-        esac
-        ;;
-      openai)
-        chunk=$(echo "$line" | jq -r '.choices[0].delta.content // empty' 2>/dev/null) || continue
-        if [[ -n "$chunk" ]]; then
-          printf '%s' "$chunk"
-          output+="$chunk"
-        fi
-        ;;
-    esac
+  while IFS= read -r -d '' -n 1 char || [[ -n "$char" ]]; do
+    printf '%s' "$char"
+    output+="$char"
   done
-
   [[ -n "$output" ]] && echo
-
-  if [[ "$http_code" != "200" && -n "$http_code" ]]; then
-    if [[ -z "$output" ]]; then
-      echo "cogcog: HTTP $http_code" >&2
-      exit 1
-    fi
-  fi
-
   if [[ -z "$output" ]]; then
     echo "cogcog: empty response" >&2
     exit 1

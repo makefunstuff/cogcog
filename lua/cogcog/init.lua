@@ -65,7 +65,7 @@ local function stream_to_buf(lines, buf, opts)
 		on_exit = function(_, code)
 			vim.schedule(function()
 				vim.fn.delete(tmp)
-				active_jobs[job] = nil
+				if job then active_jobs[job] = nil end
 				if code ~= 0 then
 					vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
 				else
@@ -207,13 +207,13 @@ local function ask_send(code_lines, source, question)
 				{ "", "--- " .. source .. " ---", "" })
 			vim.api.nvim_buf_set_lines(ctx, -1, -1, false, code_lines)
 		end
-		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "", "---", "" })
+		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "" })
 
 		stream_to_buf(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), ctx, {
 			raw = true,
 			on_done = function()
 				if vim.api.nvim_buf_is_valid(ctx) then
-					vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "" })
+					vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "---", "", "" })
 				end
 			end,
 		})
@@ -238,11 +238,30 @@ local function ask_send(code_lines, source, question)
 		end
 		table.insert(input, question)
 
-		local buf = vim.api.nvim_create_buf(false, true)
-		vim.bo[buf].filetype = "markdown"
-		vim.bo[buf].buftype = "nofile"
-		local win = make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
-		vim.api.nvim_set_option_value("number", false, { win = win })
+		-- reuse existing ask buffer/split if open
+		local buf, win
+		for _, b in ipairs(vim.api.nvim_list_bufs()) do
+			if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog%-ask%]$") then
+				buf = b
+				vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+				for _, w in ipairs(vim.api.nvim_list_wins()) do
+					if vim.api.nvim_win_get_buf(w) == buf then win = w end
+				end
+				break
+			end
+		end
+		if not buf then
+			buf = vim.api.nvim_create_buf(false, true)
+			vim.bo[buf].filetype = "markdown"
+			vim.bo[buf].buftype = "nofile"
+			vim.api.nvim_buf_set_name(buf, "[cogcog-ask]")
+		end
+		if not win then
+			win = make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
+			vim.api.nvim_set_option_value("number", false, { win = win })
+		else
+			vim.api.nvim_set_option_value("statusline", " cogcog ask │ " .. question:sub(1, 40), { win = win })
+		end
 		stream_to_buf(input, buf, { raw = true })
 	end
 end
@@ -341,14 +360,15 @@ end
 local function plan_send(question)
 	local ctx = get_or_create_ctx()
 	if question then
-		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "", "---", "" })
+		vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", question, "" })
 	end
 	show_panel()
 	stream_to_buf(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), ctx, {
 		raw = true,
 		on_done = function()
 			if vim.api.nvim_buf_is_valid(ctx) then
-				vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "" })
+				-- separator AFTER response, ready for next question
+				vim.api.nvim_buf_set_lines(ctx, -1, -1, false, { "", "---", "", "" })
 			end
 		end,
 	})
@@ -414,13 +434,28 @@ vim.keymap.set("v", "<leader>gc", function()
 end, { desc = "cogcog: check selection" })
 
 vim.keymap.set("n", "<C-g>", function()
-	-- if in context panel, send buffer as-is (question is already typed)
+	-- if in context panel, send buffer as-is
 	local buf = vim.api.nvim_get_current_buf()
 	if vim.api.nvim_buf_get_name(buf):match("%[cogcog%]$") then
 		plan_send(nil)
 		return
 	end
-	-- otherwise prompt for question
+	-- from a code file: auto-pin visible portion as context
+	local name = vim.api.nvim_buf_get_name(buf)
+	if name ~= "" and vim.bo[buf].buftype == "" then
+		local ctx = get_or_create_ctx()
+		local source = relative_name(name)
+		local ctx_text = table.concat(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), "\n")
+		if not ctx_text:find(source, 1, true) then
+			-- pin visible lines only (not entire file)
+			local top = vim.fn.line("w0")
+			local bot = vim.fn.line("w$")
+			local lines = vim.api.nvim_buf_get_lines(buf, top - 1, bot, false)
+			vim.api.nvim_buf_set_lines(ctx, -1, -1, false,
+				{ "", "--- " .. source .. ":" .. top .. "-" .. bot .. " ---", "" })
+			vim.api.nvim_buf_set_lines(ctx, -1, -1, false, lines)
+		end
+	end
 	vim.ui.input({ prompt = " plan: " }, function(q)
 		if not q or vim.trim(q) == "" then return end
 		plan_send(q)
@@ -444,7 +479,7 @@ end, { desc = "cogcog: toggle panel" })
 
 -- discover: gather project context, send to opus, save navigable output
 
-local function do_discover(discovery_file)
+local function do_discover(discovery_file, update)
 	vim.fn.mkdir(cogcog_dir, "p")
 
 	local gather = {
@@ -466,13 +501,23 @@ local function do_discover(discovery_file)
 		end
 	end
 
-	table.insert(input, [[
+	-- include existing discovery for incremental updates
+	if update and vim.fn.filereadable(discovery_file) == 1 then
+		table.insert(input, "--- previous discovery ---")
+		table.insert(input, "")
+		vim.list_extend(input, vim.fn.readfile(discovery_file))
+		table.insert(input, "")
+		table.insert(input, [[
+UPDATE the discovery document above based on the current project state.
+- Add new files/domains that appeared
+- Remove files that no longer exist (check against the tree)
+- Update descriptions if the code changed
+- Keep the same format
+- Preserve domain sections that are still accurate
+]])
+	else
+		table.insert(input, [[
 Analyze this project. Output a structured reference document organized by DOMAIN.
-
-Format rules:
-- Every file path must be real (from the tree above), written as `path/to/file.ext` for vim gf navigation
-- Group files by functional domain (auth, database, api, config, etc.) not by directory
-- Each domain section should be self-contained context: someone working on that domain can yank just that section
 
 # Project Name
 
@@ -510,70 +555,145 @@ How input flows through the system, referencing files from above.
 ## Dependencies
 
 Notable externals and what they're used for.
+]])
+	end
 
-IMPORTANT: Use ONLY real paths from the tree. Be concise. This is a reference, not an essay.
-Each domain section must work as standalone context for an LLM — if someone pastes just that section, it should have enough info to work on that domain.
+	table.insert(input, [[
+Format rules:
+- Every file path must be real, written as `path/to/file.ext` for vim gf
+- Group by functional domain, not directory
+- Each domain section = standalone LLM context
+- Use ONLY real paths. Be concise. Reference, not essay.
+- You may READ files to understand the code. Do NOT write, edit, or create any files.
+- Output ONLY the document text to stdout. Nothing else.
 ]])
 
-	-- create buffer for streaming output
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.bo[buf].filetype = "markdown"
-	vim.bo[buf].buftype = "nofile"
+	-- write empty file first so we can :edit it directly
+	vim.fn.writefile({ "# Discovering project...", "", "Please wait — Opus is analyzing." }, discovery_file)
+	vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
 
-	vim.cmd("tabnew")
-	vim.api.nvim_win_set_buf(0, buf)
-	vim.api.nvim_set_option_value("wrap", true, { win = 0 })
-	vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
-	vim.api.nvim_set_option_value("number", false, { win = 0 })
-	vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
-	vim.api.nvim_set_option_value("statusline", " cogcog discover │ analyzing...", { win = 0 })
-
-	-- set path so gf works relative to project root
-	vim.api.nvim_set_option_value("path", vim.fn.getcwd() .. "/**", { buf = buf })
-
+	local buf = vim.api.nvim_get_current_buf()
 	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_set_option_value("wrap", true, { win = win })
+	vim.api.nvim_set_option_value("linebreak", true, { win = win })
+	vim.api.nvim_set_option_value("statusline", " cogcog discover │ gathering context...", { win = win })
 
-	stream_to_buf(input, buf, {
-		cmd = checker_cmd, -- uses opus
-		on_done = function()
-			if not vim.api.nvim_buf_is_valid(buf) then return end
-			-- save to file
-			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-			vim.fn.writefile(lines, discovery_file)
-			-- now open the actual file so :w works naturally
-			vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
-			-- close the scratch buffer
-			if vim.api.nvim_buf_is_valid(buf) then
-				vim.api.nvim_buf_delete(buf, { force = true })
-			end
-			if vim.api.nvim_win_is_valid(win) then
-				vim.api.nvim_set_option_value("path", vim.fn.getcwd() .. "/**", { buf = 0 })
-				vim.api.nvim_set_option_value("statusline",
-					" cogcog discover │ done │ gf to navigate", { win = vim.api.nvim_get_current_win() })
-			end
-			vim.notify("cogcog: discovery saved to " .. discovery_file, vim.log.levels.INFO)
-		end,
-	})
+	-- clear the placeholder and start streaming
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+
+	vim.schedule(function()
+		if vim.api.nvim_win_is_valid(win) then
+			vim.api.nvim_set_option_value("statusline", " cogcog discover │ opus is analyzing...", { win = win })
+		end
+
+		stream_to_buf(input, buf, {
+			cmd = checker_cmd, -- uses best model (opus) with tool access via pi
+			on_done = function()
+				if not vim.api.nvim_buf_is_valid(buf) then return end
+				-- save the streamed content to file
+				local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+				vim.fn.writefile(lines, discovery_file)
+				-- reload from file so the buffer is "saved" (no modified flag)
+				vim.cmd("edit!")
+				if vim.api.nvim_win_is_valid(win) then
+					vim.api.nvim_set_option_value("statusline",
+						" cogcog discover │ done │ gf to navigate", { win = win })
+				end
+				vim.notify("cogcog: saved " .. discovery_file, vim.log.levels.INFO)
+			end,
+		})
+	end)
 end
 
 -- <leader>cd: discover — gather project context, opus analyzes, save to .cogcog/discovery.md
 vim.keymap.set("n", "<leader>cd", function()
 	local discovery_file = cogcog_dir .. "/discovery.md"
 
-	-- if discovery exists, just open it
 	if vim.fn.filereadable(discovery_file) == 1 then
-		vim.ui.select({ "Open existing", "Re-discover" }, { prompt = "Discovery exists:" }, function(choice)
+		vim.ui.select({ "Open", "Update", "Re-discover from scratch" }, {
+			prompt = "discovery.md exists:",
+		}, function(choice)
 			if not choice then return end
-			if choice == "Open existing" then
+			if choice == "Open" then
 				vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
+			elseif choice == "Update" then
+				do_discover(discovery_file, true)
 			else
-				do_discover(discovery_file)
+				do_discover(discovery_file, false)
 			end
 		end)
 		return
 	end
-	do_discover(discovery_file)
+	do_discover(discovery_file, false)
 end, { desc = "cogcog: discover project" })
+
+-- <leader>cp: improve prompt — learn from bad responses
+vim.keymap.set("n", "<leader>cp", function()
+	-- grab visible text from the current buffer (response or context panel)
+	local buf = vim.api.nvim_get_current_buf()
+	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+	local content = table.concat(lines, "\n")
+	if vim.trim(content) == "" then
+		vim.notify("cogcog: nothing to improve from", vim.log.levels.WARN)
+		return
+	end
+
+	vim.ui.input({ prompt = " what was wrong: " }, function(feedback)
+		if not feedback or vim.trim(feedback) == "" then return end
+
+		local sys_file = cogcog_dir .. "/system.md"
+		local current_prompt = ""
+		if vim.fn.filereadable(sys_file) == 1 then
+			current_prompt = table.concat(vim.fn.readfile(sys_file), "\n")
+		end
+
+		local input = {
+			"You are a prompt engineer. A user asked an LLM a question and got a bad response.",
+			"",
+			"Current system prompt:",
+			current_prompt,
+			"",
+			"The conversation/response that was bad:",
+			content,
+			"",
+			"User feedback on what was wrong:",
+			feedback,
+			"",
+			"Write ONE concise instruction (1-2 sentences) to add to the system prompt",
+			"that would prevent this problem in the future.",
+			"Output ONLY the instruction line, nothing else. No quotes, no explanation.",
+		}
+
+		local tmp = vim.fn.tempname()
+		vim.fn.writefile(input, tmp)
+
+		vim.notify("cogcog: improving prompt...", vim.log.levels.INFO)
+
+		vim.fn.jobstart({ "bash", "-c", cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp) }, {
+			stdout_buffered = true,
+			on_stdout = function(_, data)
+				if not data then return end
+				vim.schedule(function()
+					local improvement = vim.trim(table.concat(data, "\n"))
+					if improvement == "" then return end
+
+					-- append to system.md
+					vim.fn.mkdir(cogcog_dir, "p")
+					local existing = {}
+					if vim.fn.filereadable(sys_file) == 1 then
+						existing = vim.fn.readfile(sys_file)
+					end
+					table.insert(existing, improvement)
+					vim.fn.writefile(existing, sys_file)
+					vim.notify("cogcog: added to system.md: " .. improvement:sub(1, 60), vim.log.levels.INFO)
+				end)
+			end,
+			on_exit = function()
+				vim.schedule(function() vim.fn.delete(tmp) end)
+			end,
+		})
+	end)
+end, { desc = "cogcog: improve prompt" })
 
 vim.keymap.set("n", "<leader>cc", function()
 	local buf = get_or_create_ctx()

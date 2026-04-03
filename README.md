@@ -4,19 +4,29 @@ LLM as a vim verb.
 
 **You build context manually, so you read the code. You choose what matters. The LLM only sees what you curated.**
 
+## What you can do
+
+```
+gaf  → "what does this function do?"     instant answer, stay in your code
+gsaf → "add error handling"              generates code in a new buffer
+<leader>gcaf                             opus verifies the code
+<C-g> → "let's design the auth flow"    stateful planning conversation
+<leader>cd                               opus maps the entire project
+```
+
 ## Three verbs
 
-| Verb | What | Model | Cost |
-|------|------|-------|------|
-| `ga` | ask / explain | gemma4 E4B (local) | $0 |
-| `gs` | generate code | kimi-k2.5 (opencode zen) | sub |
-| `<leader>gc` | verify / check | opus xhigh (anthropic) | sub |
+| Verb | Role | Speed |
+|------|------|-------|
+| `ga` | ask / explain | fast (local model) |
+| `gs` | generate code | agentic (tool calls, web search) |
+| `<leader>gc` | verify / review | deep (strongest model) |
 
-`ga` and `gs` compose with any vim motion: `gaip`, `gsaf`, `<leader>gcaf`.
+All compose with motions: `gaip`, `gsaf`, `<leader>gcaf`. All work in visual mode.
 
 ## Workflows
 
-### Ask (`ga`) — fast, local
+### Ask (`ga`) — stateless or stateful
 
 ```
 gaip        → "what does this do?"
@@ -24,36 +34,42 @@ gaf         → "any bugs here?"
 Visual ga   → "explain the error"
 ```
 
-Panel closed = stateless (throwaway split). Panel open = stateful (conversation accumulates).
+**Panel closed** = one-shot answer in a throwaway split. Quickfix auto-included.
+**Panel open** = conversation. Questions and answers accumulate.
 
-Quickfix entries (LSP diagnostics, `:grep`, `:make` errors) are auto-included.
-
-### Generate (`gs`) — agentic, cloud
+### Generate (`gs`) — agentic
 
 ```
 gsip        → "rewrite in async/await"
 Visual gs   → "add error handling"
 ```
 
-Uses an agent backend with tool calls and web search. Output auto-detects language, strips code fences, sets filetype. `:w filename` to save.
+Agent backend with tool calls. Output auto-detects language, strips code fences. `:w filename` to save.
 
 ### Check (`<leader>gc`) — deep verification
 
 ```
-<leader>gcaf    → opus reviews this function
-Visual <leader>gc → opus reviews selection
+<leader>gcaf        opus reviews this function
+Visual <leader>gc   opus reviews selection
 ```
-
-Generate cheap, verify smart. Local model writes, cloud model catches bugs.
 
 ### Plan (`<C-g>`) — stateful conversation
 
 ```
-<C-g>       → "let's design the auth flow"
-<C-g>       → "what about token refresh?"
+<C-g> → "let's design the auth flow"
+<C-g> → "what about token refresh?"
+gsaf  → "implement based on our plan"
 ```
 
-Build up context with `<leader>cy`, then `gs` to materialize code from the plan.
+Auto-pins the current file to context when asked from a code buffer.
+
+### Discover (`<leader>cd`) — project map
+
+One-time deep analysis. Opus maps your project by domain, outputs `gf`-navigable reference saved to `.cogcog/discovery.md`.
+
+### Improve (`<leader>cp`) — learn from bad responses
+
+Got a bad response? `<leader>cp` → tell it what was wrong → generates a system prompt fix and appends to `.cogcog/system.md`. Your prompts improve incrementally.
 
 ## Install
 
@@ -68,24 +84,40 @@ Neovim (lazy.nvim):
 { dir = "/path/to/cogcog" }
 ```
 
-Requires: `curl`, `jq` for raw API path.
+Requires: `curl`, `jq`.
+
+## Quickstart
+
+Simplest setup — just Anthropic:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+echo "hello" | cogcog
+```
 
 ## Configuration
 
+Three independent paths. Configure what you need:
+
 ```bash
-# ga: fast local model (any OpenAI-compatible endpoint)
+# ask (ga): any OpenAI-compatible API — local Ollama, OpenRouter, Groq, etc.
 export COGCOG_BACKEND=openai
-export COGCOG_API_URL=http://192.168.1.138:8090/v1/chat/completions
-export COGCOG_API_KEY=unused
-export COGCOG_FAST_MODEL="gemma-4-E4B-it-Q4_K_M"
+export COGCOG_API_URL=http://localhost:8090/v1/chat/completions
+export COGCOG_API_KEY=your-key
+export COGCOG_FAST_MODEL="your-fast-model"
 
-# gs: agent backend (any stdin→stdout CLI with tool calling)
-export COGCOG_CMD="opencode run -m opencode/kimi-k2.5"
+# generate (gs): any stdin→stdout CLI with tool calling
+export COGCOG_CMD="opencode run -m your/model"
 
-# gc: checker is configured in lua (default: pi -p --provider anthropic --model opus:xhigh)
+# check (gc): configurable via env var
+export COGCOG_CHECKER="pi -p --provider anthropic --model opus:xhigh"
 ```
 
-The three paths can point anywhere — local Ollama, OpenRouter, Anthropic, any OpenAI-compatible API.
+Or use Anthropic for everything (default, no extra config):
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
 
 ## Keymaps
 
@@ -97,21 +129,22 @@ The three paths can point anywhere — local Ollama, OpenRouter, Anthropic, any 
 | `gs` | visual | generate from selection |
 | `<leader>gc{motion}` | normal | check text object |
 | `<leader>gc` | visual | check selection |
-| `<C-g>` | normal | plan (stateful follow-up) |
+| `<C-g>` | normal | plan (auto-pins current file) |
 | `<leader>cy` | visual | pin selection to context |
 | `<leader>co` | normal | toggle context panel |
 | `<leader>cd` | normal | discover project |
+| `<leader>cp` | normal | improve prompt from bad response |
 | `<leader>cc` | normal | clear context |
 | `<C-c>` | any | cancel running job |
 
 ## Context
 
-Context is a buffer. Use Neovim to manage it:
+Context is a buffer. Use Neovim:
 
 ```vim
-:read .cogcog/review.md          " add a skill
-:read !git diff                  " add tool output
-dap                              " delete a section
+:read .cogcog/review.md     " add a skill
+:read !git diff             " add tool output
+dap                         " delete a section
 ```
 
 Session auto-saves on exit. System prompt loads from `.cogcog/system.md`.
@@ -123,78 +156,13 @@ echo "explain CRDs" | cogcog
 git diff --staged | cogcog --raw "review this"
 ```
 
-## Day 1 on a new codebase
-
-`<leader>cd` — one keymap. Gathers project tree, entry points, deps, git log, README. Sends to Opus for deep analysis. Saves a navigable reference to `.cogcog/discovery.md`.
-
-```
-<leader>cd                          " opus analyzes the project (one-time cost)
-```
-
-The output is a `gf`-navigable document — cursor on any file path, press `gf`, you're there:
-
-```markdown
-## Key Files
-- `src/auth/middleware.ts` — JWT validation, token refresh
-- `src/db/connection.ts` — database pool, migration runner
-```
-
-Run it once per project. Re-open anytime with `<leader>cd` again. Then explore interactively:
-
-```
-<C-g> → "show me the request lifecycle"
-gd → gaf → "explain this"
-```
-
-## What you can do in 5 minutes
-
-**Understand unfamiliar code:**
-```
-gaf → "what does this function do?"
-gaf → "what happens if the input is nil?"
-```
-
-**Find and fix a bug:**
-```vim
-:make                                   " build errors → quickfix
-gaip → "why is this failing?"           " LLM sees errors + code
-gsaf → "fix it"                         " generates fixed version
-:w                                      " save, re-run :make
-```
-
-**Review before committing:**
-```bash
-git diff --staged | cogcog --raw "review for bugs"
-```
-
-**Generate a function:**
-```
-gsip → "write a function that retries HTTP requests with exponential backoff"
-:w src/retry.ts                         " save the generated code
-<leader>gcaf                            " opus verifies it
-```
-
-**Explore a new codebase:**
-```
-<leader>cd                              " auto-gathers structure + entry points
-<C-g> → "where's the database layer?"   " follow up
-gd → gaf → "explain this"              " navigate and ask
-```
-
-**Plan then build:**
-```
-<leader>co                              " open panel
-<C-g> → "I need to add rate limiting. What's the approach?"
-<C-g> → "use token bucket, not sliding window"
-gsaf → "implement based on our plan"    " generates from conversation
-```
-
-See **[USAGE.md](USAGE.md)** for more tricks and patterns. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why MCP is `curl` and every "agent feature" done with tools you already have.
+See **[USAGE.md](USAGE.md)** for tricks. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why `|` is the only protocol you need. Run `:help cogcog` inside Neovim.
 
 ## Structure
 
 ```
 bin/cogcog              # bash: stdin → LLM → stdout
-lua/cogcog/init.lua     # neovim: ga/gs/gc/plan
-.cogcog/                # project skills and templates
+lua/cogcog/init.lua     # neovim: ga/gs/gc/plan/discover
+doc/cogcog.txt          # :help cogcog
+.cogcog/                # project prompts and templates
 ```
