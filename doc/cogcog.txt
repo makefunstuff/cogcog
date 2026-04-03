@@ -5,134 +5,130 @@ License: MIT
 
 INTRODUCTION                                    *cogcog*
 
-cogcog adds three LLM verbs to vim: ask, generate, check. They compose
-with motions and text objects like any vim operator.
+cogcog adds LLM verbs to vim that compose with motions and text
+objects. Your vim state is context: visible windows, quickfix,
+jump trail, recent changes.
 
-Two context modes: you curate (ga) or the LLM curates (plan/gs/gc).
-
-Note: `ga` overrides vim's built-in show-ASCII, `gs` overrides
-sleep, `<C-g>` overrides show-file-info. These are deliberate
-tradeoffs for frequently-used LLM verbs.
+Note: `ga` overrides show-ASCII, `gs` overrides sleep,
+`<C-g>` overrides show-file-info. Deliberate tradeoffs.
 
 VERBS                                           *cogcog-verbs*
 
                                                 *cogcog-ga*
-ga{motion}      Ask about code. Fast local model. You provide the
-                context via selection/motion.
+ga{motion}      Explain code. No prompt — instant. Fast local model.
+                Count controls verbosity:
+                  `gaip`  = concise
+                  `1gaip` = one sentence
+                  `2gaip` = clear
+                  `3gaip` = detailed with examples
 
-                Stateless by default (throwaway split, reused).
-                If the context panel is open, becomes stateful.
+                Auto-includes visible windows and quickfix.
+                Panel open = stateful. Closed = stateless.
 
-                Quickfix entries are auto-included as context.
-                Response split closes with `q`.
+                Visual mode: select then `ga` — prompted.
 
                                                 *cogcog-gs*
-gs{motion}      Generate code. Agent backend with tool calling.
-                Can read files, run commands, search the web.
-                Output goes to a fresh code buffer with line numbers.
-
-                Auto-detects language from code fences.
-                Use `:w filename` to save. Close with `q`.
-                Planning context is included if non-empty.
+gs{motion}      Generate code. Agent backend with tools.
+                Output in a new code buffer with line numbers.
+                Auto-detects language, strips code fences.
+                `:w filename` to save. `q` to close.
 
                                                 *cogcog-gss*
-gss             Generate from entire buffer. Same as `gs` but
-                operates on all lines.
+gss             Generate from entire buffer.
 
                                                 *cogcog-gr*
-gr{motion}      Refactor in-place. Replaces the selected code with
-                the LLM's rewrite. Uses fast local model (--raw).
-
-                Examples: `graf` `grip` `gr3j`
-                Visual: select then `gr`
-
-                Undo with `u`. The original code is in the undo tree.
+<leader>gr{motion}
+                Refactor in-place. Fast local model.
+                Replaces the code directly. `u` to undo.
+                Works on code and prose.
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check code with strongest model (Opus by default).
-                Deep review for correctness, edge cases, bugs.
-                Response split closes with `q`.
+                Check with strongest model. Deep review for
+                correctness, edge cases, bugs.
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
-<C-g>           Agentic planning. Uses agent backend — can read
-                files, search the codebase, use tools. The LLM
-                decides what context is relevant.
-
-                From context panel: sends buffer as-is.
-                From any other buffer: prompts for question.
-
-                Pin specific code with <leader>cy when you know
-                better than the LLM what's relevant.
+<C-g>           Context-aware:
+                - Code file: prompts, sends to agent (has tools)
+                - Context panel: sends buffer as-is
+                - Exec buffer: continues the conversation
 
                                                 *cogcog-cy*
-<leader>cy      (visual) Pin selection to context panel. Manual
-                context curation. Does not send.
+<leader>cy      (visual) Pin selection to context panel.
+
+VIM STATE AS CONTEXT                            *cogcog-context*
+
+                                                *cogcog-gj*
+<leader>gj      Ask about jump trail. Gathers code from your
+                last 8 jump locations. "How do these connect?"
+
+                                                *cogcog-g-dot*
+<leader>g.      Review recent changes. Gathers lines you edited.
+                "Any bugs or issues?"
+
+ga auto-includes:
+- Visible code from all windows (your screen layout)
+- Quickfix entries (LSP diagnostics, grep, make errors)
+
+EXECUTE                                         *cogcog-exec*
+
+                                                *cogcog-gx*
+<leader>gx      Agent execute. Multi-file work with live activity.
+                Sends current file + open buffer list + context.
+                Agent stderr shown in the buffer as progress.
+
+                `<C-g>` in the exec buffer continues the session.
 
 CONTEXT PANEL                                   *cogcog-panel*
 
                                                 *cogcog-co*
-<leader>co      Toggle the context panel. When open, `ga` becomes
-                stateful — questions and answers accumulate.
-
-                The panel is a regular buffer. Use native vim:
+<leader>co      Toggle panel. When open, `ga` becomes stateful.
+                The panel is a regular buffer:
 >
                 :read .cogcog/review.md     add a skill
                 :read !git diff             add tool output
                 dap                         delete a section
 <
                                                 *cogcog-cc*
-<leader>cc      Clear context and reload system prompt.
+<leader>cc      Clear context, reload system prompt.
 
                                                 *cogcog-cancel*
-<C-c>           Cancel any running cogcog job. Passes through to
-                default <C-c> when no jobs are active.
+<C-c>           Cancel running jobs. Passes through when idle.
 
 DISCOVERY                                       *cogcog-discover*
 
                                                 *cogcog-cd*
-<leader>cd      Discover project. Uses strongest model with tool
-                access to read files and map the codebase by domain.
-
-                Output saved to `.cogcog/discovery.md` with
-                gf-navigable file paths.
-
-                Three options when discovery exists:
-                - Open: view existing map
-                - Update: incremental refresh
-                - Re-discover: full re-analysis
+<leader>cd      Map project by domain using strongest model.
+                Saved to `.cogcog/discovery.md` (gf-navigable).
+                Options: Open / Update / Re-discover.
 
 PROMPT IMPROVEMENT                              *cogcog-improve*
 
                                                 *cogcog-cp*
-<leader>cp      Improve prompts from bad responses. Navigate to
-                the bad response, press <leader>cp, describe what
-                was wrong. Generates a system prompt fix and
+<leader>cp      Learn from bad response. Generates instruction,
                 appends to `.cogcog/system.md`.
 
 CONFIGURATION                                   *cogcog-config*
 
-Three independent backend paths:
+Three backend paths:
 
-    ga          COGCOG_FAST_MODEL via COGCOG_API_URL
-    gs/<C-g>    COGCOG_CMD (agent with tools)
+    ga/gr       COGCOG_FAST_MODEL via COGCOG_API_URL (--raw)
+    gs/<C-g>/gx COGCOG_CMD (agent with tools)
     gc/discover COGCOG_CHECKER (strongest model)
 
                                                 *cogcog-fast-model*
-COGCOG_FAST_MODEL   Model for `ga` ask. Used with --raw.
+COGCOG_FAST_MODEL   Model for ask/refactor.
 
                                                 *cogcog-cmd*
-COGCOG_CMD          Agent CLI for `gs` and `<C-g>`.
-                    Must be stdin→stdout.
+COGCOG_CMD          Agent CLI for generate/plan/exec.
 
                                                 *cogcog-checker*
-COGCOG_CHECKER      CLI for `gc` and `<leader>cd`.
-                    Default: pi -p --provider anthropic --model opus:xhigh
+COGCOG_CHECKER      CLI for check/discover.
 
                                                 *cogcog-backend*
-COGCOG_BACKEND      API type: "anthropic" (default) or "openai"
+COGCOG_BACKEND      "anthropic" (default) or "openai"
 
                                                 *cogcog-api-url*
 COGCOG_API_URL      API endpoint for raw path.
@@ -140,51 +136,44 @@ COGCOG_API_URL      API endpoint for raw path.
                                                 *cogcog-api-key*
 COGCOG_API_KEY      API key.
 
+Simplest setup: just ANTHROPIC_API_KEY. All verbs work.
+
 PROJECT FILES                                   *cogcog-project*
 
-.cogcog/system.md       System prompt. Auto-loaded. Improved via <leader>cp.
-.cogcog/session.md      Auto-saved on exit, restored on open.
+.cogcog/system.md       System prompt. Auto-loaded.
+.cogcog/session.md      Auto-saved/restored.
 .cogcog/discovery.md    Project map from <leader>cd.
-.cogcog/*.md            Skill templates. `:read` into context.
+.cogcog/*.md            Skill templates.
 
-SHELL USAGE                                     *cogcog-shell*
->
-    echo "explain CRDs" | cogcog
-    git diff --staged | cogcog --raw "review this"
-<
---raw forces direct API (bypasses COGCOG_CMD, uses COGCOG_FAST_MODEL).
+STRUCTURE                                       *cogcog-structure*
+
+    lua/cogcog/init.lua     verbs and keymaps
+    lua/cogcog/stream.lua   shared streaming
+    lua/cogcog/context.lua  input builders, panel, helpers
+    lua/cogcog/config.lua   paths and config
+    bin/cogcog              bash: stdin → LLM → stdout
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 
-Verbs (you curate context): >
-
-    ga{motion}          ask (fast, local)
-    gs{motion}          generate → new buffer (agent, tools)
-    gss                 generate from entire buffer
-    gr{motion}          refactor in-place (undo with u)
-    <leader>gc{motion}  check (deep, strongest)
+Verbs: >
+    gaip / 3gaip            explain (count = verbosity)
+    Visual ga               ask (prompted)
+    gsip / gss              generate → code buffer
+    <leader>grip            refactor in-place
+    <leader>gcip            check (deep)
 <
-
-Context & planning (LLM curates context): >
-
-    <C-g>            plan (agentic, reads files)
-    <leader>cy       pin selection to context
-    <leader>co       toggle context panel
-    <leader>cd       discover / update project map
-    <leader>cp       improve prompt from bad response
-    <leader>cc       clear context
-    <C-c>            cancel running job
-    q                close response split
-<
-
-Combos: >
-
-    gd → gaf                    definition → ask
-    :make → gaip                errors → explain
-    ggVG ga                     explain entire file
-    <leader>cy × N → <C-g>     pin from files → plan
-    gsip → <leader>gcip         generate → verify
-    <leader>cd → <C-g>          discover → explore
+Context: >
+    <C-g>                   plan / continue
+    <leader>cy              pin selection
+    <leader>co              toggle panel
+    <leader>gx              agent execute
+    <leader>gj              jump trail
+    <leader>g.              recent changes
+    <leader>cd              discover project
+    <leader>cp              improve prompt
+    <leader>cc              clear
+    <C-c>                   cancel
+    q                       close split
 <
 
  vim:tw=78:ts=8:ft=help:norl:

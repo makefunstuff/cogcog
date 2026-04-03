@@ -1,264 +1,167 @@
 # Tutorial: First hour with cogcog
 
-## Setup (2 minutes)
+## Setup
 
 ```bash
-# minimal: just an API key
 export ANTHROPIC_API_KEY="sk-ant-..."
-
-# put cogcog on PATH
-cp bin/cogcog ~/.local/bin/
-chmod +x ~/.local/bin/cogcog
-
-# test it
+cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
 echo "hello" | cogcog
 ```
 
-Add to your Neovim config (lazy.nvim):
+Neovim (lazy.nvim):
 
 ```lua
 { dir = "/path/to/cogcog" }
 ```
 
-Restart Neovim. All verbs work.
-
-## Open a project
-
-```bash
-cd ~/Work/some-project
-nvim
-```
-
-### 1. Map the project
+## 1. Map the project
 
 ```
 <leader>cd
 ```
 
-Wait 30-60 seconds. The LLM reads your project and writes a domain-organized reference to `.cogcog/discovery.md`. You see it streaming in.
+Wait 30-60 seconds. Output is a `gf`-navigable reference saved to `.cogcog/discovery.md`. Cursor on a path → `gf` → you're in the file.
 
-When done, you have something like:
+## 2. Understand code
 
-```markdown
-## Domains
-
-### Auth
-- `src/auth/middleware.ts` — JWT validation, token refresh
-- `src/auth/oauth.ts` — OAuth2 PKCE flow
-
-### Database
-- `src/db/pool.ts` — connection pooling
-- `src/db/migrations/` — knex migrations
-```
-
-Put your cursor on any path. Press `gf`. You're in that file.
-
-### 2. Understand code
-
-You're in `src/auth/middleware.ts`. You see a function you don't understand:
+Navigate to a function:
 
 ```
-gaf → "what does this do?"
+gaip             instant explain (no prompt)
+3gaip            detailed explanation
 ```
 
-A split opens on the right with the explanation. Read it. Press `q` to close.
+`ga` auto-includes visible windows and quickfix. Press `q` to close the response.
 
-Try another:
+## 3. Ask specific questions
 
-```
-gaip → "why is this checking the expiry twice?"
-```
-
-These are stateless — each question is independent. Quick and disposable.
-
-### 3. Go deeper with a conversation
-
-Open the context panel:
+Visual select code:
 
 ```
-<leader>co
+Visual ga → "is this thread-safe?"
+Visual ga → "what happens on timeout?"
 ```
 
-Now `ga` becomes stateful — answers accumulate:
+## 4. Deep exploration (stateful)
 
 ```
-gaf → "how does token refresh work?"
-gaf → "what happens if the refresh token is expired?"
-gaf → "could this deadlock under high concurrency?"
+<leader>co                 open panel — ga is now stateful
+gaip                       first question
+gaip                       builds on previous answer
+<leader>co                 close panel — back to stateless
 ```
 
-Each answer builds on the previous. The panel shows the full conversation.
-
-Close the panel to go back to stateless mode:
-
-```
-<leader>co
-```
-
-### 4. Pin code from multiple files
-
-You want to ask about how two files interact. Navigate to file A:
+## 5. Pin from multiple files
 
 ```vim
-" select the relevant function
-visual <leader>cy
+" in file A: visual select → <leader>cy
+" in file B: visual select → <leader>cy
+<C-g> → "can these race?"
 ```
 
-Navigate to file B:
-
-```vim
-" select another function
-visual <leader>cy
-```
-
-Both are now in the context panel. Ask about them together:
+## 6. Plan a feature
 
 ```
-<C-g> → "can these functions race? what if both are called simultaneously?"
+<C-g> → "I need to add rate limiting"
+<C-g> → "use token bucket, store in redis"
 ```
 
-The LLM sees both pinned selections and your question.
+Agent reads your codebase and discusses the approach.
 
-### 5. Plan a feature
-
-```
-<C-g> → "I need to add rate limiting to the API. What's the approach?"
-```
-
-The agent reads your codebase (it has tool access) and suggests an approach. Follow up:
+## 7. Generate code
 
 ```
-<C-g> → "use token bucket, not sliding window"
-<C-g> → "where exactly should the middleware go?"
-```
-
-The conversation accumulates in the context panel.
-
-### 6. Generate code
-
-From the planning conversation, generate the implementation:
-
-```
-gsaf → "implement the rate limiting middleware based on our discussion"
-```
-
-A code buffer opens below with the generated code. It has line numbers and the right filetype.
-
-Save it:
-
-```vim
+gsaf → "implement rate limiting based on our plan"
 :w src/middleware/ratelimit.ts
 ```
 
-### 7. Verify the code
+Code buffer auto-detects language and sets filetype.
 
-Select the generated code and check it with the strongest model:
+## 8. Refactor in-place
+
+```
+<leader>graf → "simplify this function"
+```
+
+Code replaced directly. `u` to undo if you don't like it.
+
+## 9. Verify
 
 ```
 <leader>gcaf
 ```
 
-A review appears in a side split. Read the feedback. Press `q` to close.
+Strongest model reviews for bugs. `q` to close.
 
-### 8. Test and iterate
+## 10. Multi-file agent work
 
-Run your tests:
+```
+<leader>gx → "refactor auth module to use JWT everywhere"
+```
+
+Agent activity streams live. `<C-g>` in the exec buffer to continue.
+
+## 11. Test and iterate
 
 ```vim
+:make                               " errors → quickfix
+gaip                                " explain failure (quickfix auto-included)
+gsaf → "fix it"
 :make
+<leader>gcaf                        " verify
 ```
 
-If tests fail, errors land in quickfix. Ask about them:
+## 12. Use your vim state
+
+After navigating around with `gd`, `gr`, `<C-o>`:
 
 ```
-gaip → "why is this failing?"
+<leader>gj                          " how do these locations connect?
 ```
 
-Quickfix entries are auto-included — the LLM sees both your code and the errors.
-
-Fix it:
+After editing code:
 
 ```
-gsaf → "fix the test failures"
+<leader>g.                          " any bugs in my changes?
 ```
 
-Save, test again. Repeat until green.
+## 13. Improve prompts over time
 
-### 9. Review before committing
+Bad response? Fix it permanently:
 
-From the shell:
-
-```bash
-git diff --staged | cogcog --raw "review for bugs, security issues"
+```
+<leader>cp → "it gave generic advice"
 ```
 
-Or from vim:
+Appends instruction to `.cogcog/system.md`.
 
-```vim
-:read !git diff --staged
-gaip → "anything wrong with these changes?"
-```
+## 14. Save sessions
 
-### 10. Save your session
-
-The context panel auto-saves when you quit. Next time you open this project, `<leader>co` restores the conversation.
-
-Save a named session for later:
+Auto-saves on quit. Save manually:
 
 ```vim
 <leader>co
-:w .cogcog/rate-limiting-session.md
+:w .cogcog/auth-investigation.md
 ```
 
 Resume next week:
 
 ```vim
-<leader>co
-:read .cogcog/rate-limiting-session.md
+:read .cogcog/auth-investigation.md
 <C-g> → "continuing from where we left off"
 ```
 
-## Improve over time
-
-When a response is bad:
+## Daily workflow
 
 ```
-<leader>cp → "it gave generic advice instead of analyzing my actual code"
-```
-
-This generates an instruction and appends it to `.cogcog/system.md`. Your prompts get better project-by-project.
-
-## Add project-specific skills
-
-Create `.cogcog/system.md` in your project:
-
-```markdown
-You are a senior TypeScript engineer working on a Node.js API.
-This project uses Knex for database, JWT for auth, Redis for caching.
-Be concise. Reference file paths. Show code, not prose.
-```
-
-This loads automatically into every context panel session.
-
-Add reusable templates:
-
-```markdown
-<!-- .cogcog/review.md -->
-Review for: bugs, security issues, performance problems, error handling.
-Reference line numbers. No generic advice.
-```
-
-Load them with `:read .cogcog/review.md` in the context panel.
-
-## Daily workflow cheatsheet
-
-```
-gaf             "what does this do?"        quick understanding
-gsaf            "add error handling"         generate code
-<leader>gcaf    verify with strongest model  before committing
-<C-g>           plan a feature               agentic conversation
-<leader>cy      pin code for cross-file questions
-<leader>cd      map a new project
-q               close any response split
-<C-c>           cancel if it's taking too long
+gaip             quick understanding
+gsaf             generate code
+<leader>graf     refactor in-place
+<leader>gcaf     verify before commit
+<C-g>            plan a feature
+<leader>gx       multi-file agent work
+<leader>gj       investigate navigation trail
+<leader>g.       review your changes
+q                close response
+<C-c>            cancel if slow
 ```
