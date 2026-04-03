@@ -100,6 +100,7 @@ The three paths can point anywhere — local Ollama, OpenRouter, Anthropic, any 
 | `<C-g>` | normal | plan (stateful follow-up) |
 | `<leader>cy` | visual | pin selection to context |
 | `<leader>co` | normal | toggle context panel |
+| `<leader>cd` | normal | discover project |
 | `<leader>cc` | normal | clear context |
 | `<C-c>` | any | cancel running job |
 
@@ -122,7 +123,64 @@ echo "explain CRDs" | cogcog
 git diff --staged | cogcog --raw "review this"
 ```
 
-See **[USAGE.md](USAGE.md)** for tricks and patterns. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why MCP is `curl` and every "agent feature" done with tools you already have.
+## Day 1 on a new codebase
+
+`<leader>cd` — one keymap. Gathers project structure, entry points, package info, git history, README. Sends everything to the LLM and asks "explain this project."
+
+```
+<leader>cd                          " auto-discover: tree + entry points + deps + git log → LLM
+<C-g> → "show me the request lifecycle"
+<C-g> → "where's the auth logic?"
+```
+
+From there, follow the LLM's pointers with `gd` (go to definition), pin what you find with `<leader>cy`, keep asking. The panel accumulates your exploration.
+
+The agent reads 50 files silently and gives you an answer. cogcog reads 5 files with you and gives you understanding.
+
+## What you can do in 5 minutes
+
+**Understand unfamiliar code:**
+```
+gaf → "what does this function do?"
+gaf → "what happens if the input is nil?"
+```
+
+**Find and fix a bug:**
+```vim
+:make                                   " build errors → quickfix
+gaip → "why is this failing?"           " LLM sees errors + code
+gsaf → "fix it"                         " generates fixed version
+:w                                      " save, re-run :make
+```
+
+**Review before committing:**
+```bash
+git diff --staged | cogcog --raw "review for bugs"
+```
+
+**Generate a function:**
+```
+gsip → "write a function that retries HTTP requests with exponential backoff"
+:w src/retry.ts                         " save the generated code
+<leader>gcaf                            " opus verifies it
+```
+
+**Explore a new codebase:**
+```
+<leader>cd                              " auto-gathers structure + entry points
+<C-g> → "where's the database layer?"   " follow up
+gd → gaf → "explain this"              " navigate and ask
+```
+
+**Plan then build:**
+```
+<leader>co                              " open panel
+<C-g> → "I need to add rate limiting. What's the approach?"
+<C-g> → "use token bucket, not sliding window"
+gsaf → "implement based on our plan"    " generates from conversation
+```
+
+See **[USAGE.md](USAGE.md)** for more tricks and patterns. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why MCP is `curl` and every "agent feature" done with tools you already have.
 
 ## Structure
 

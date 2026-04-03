@@ -1,24 +1,14 @@
 # Unix Is Your IDE
 
-No frameworks. No SDKs. No MCP servers. Just the tools you already have.
-
-## Why
-
-The LLM is just another Unix filter. It reads text, processes it, writes text. Like `grep`, `sort`, `jq`, `awk` — except it understands natural language.
-
-MCP is a protocol for doing what `|` already does. Tool calling is what `command | llm` already does. RAG is what `grep -rn` already does. Agent memory is what a markdown file already does.
-
-The industry builds complex systems to replicate what Unix gives you for free. The LLM is the new thing. The rest has been solved since the 1970s.
-
-## The cost of abstractions
-
-Every layer between you and the answer adds latency, tokens, money, opacity, and fragility. The Unix approach has a pipe (zero latency), the text you chose (minimal tokens), your judgment (free), full visibility, and no dependencies.
-
-An agent burns 15000 tokens reading 10 files, 80% irrelevant. You `grep -rn "authenticate" src/` and send 50 relevant lines. Better answer, 30x cheaper.
-
-## Practical examples
-
 Every example below works today, on any machine with a shell and an LLM CLI. Replace `llm` with whatever you use — `cogcog`, `claude -p`, `opencode run`, `ollama run`, or a `curl` one-liner.
+
+The pattern is always the same:
+
+```
+command that produces text | llm "question about that text"
+```
+
+That's it. Every CLI you have is an LLM context source. `|` is the protocol.
 
 ## File operations
 
@@ -422,6 +412,16 @@ The LLM is the last filter in the pipeline. Everything before it is standard Uni
 No server. No framework. No protocol. No SDK. No API key management library. No agent orchestration. No vector database. No embedding pipeline.
 
 Just `|`.
+
+## Why this works
+
+The LLM is just another Unix filter. It reads text, processes it, writes text — like `grep`, `sort`, `jq`, `awk`, except it understands natural language.
+
+Every layer between you and the answer costs: latency (tool call round-trips), tokens (framework overhead), money (every token costs), opacity (you can't see what was sent), fragility (server down, rate limited). A pipe has none of these costs.
+
+An agent reads 15 files (15000 tokens, 80% irrelevant) because it can't judge what matters. You `grep` for the 50 lines that matter. Better context, better answer, 30x cheaper.
+
+This doesn't mean agents are useless — they're great for day 1 on a codebase when you genuinely don't know where to look. But by day 30, you're faster with `grep | llm` than any agent is with 15 tool calls. Most of your work happens on day 30, not day 1.
 
 ## The buzzword translation table
 

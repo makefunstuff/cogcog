@@ -435,6 +435,39 @@ vim.keymap.set("n", "<leader>co", function()
 	else show_panel() end
 end, { desc = "cogcog: toggle panel" })
 
+-- <leader>cd: discover — auto-gather project context and explain
+vim.keymap.set("n", "<leader>cd", function()
+	local ctx = get_or_create_ctx()
+	-- clear and rebuild
+	vim.api.nvim_buf_set_lines(ctx, 0, -1, false, {})
+
+	local sys = cogcog_dir .. "/system.md"
+	if vim.fn.filereadable(sys) == 1 then
+		vim.api.nvim_buf_set_lines(ctx, 0, -1, false, vim.fn.readfile(sys))
+	end
+
+	-- gather project context automatically
+	local sections = {
+		{ "structure", "tree -L 3 --noreport -I 'node_modules|.git|__pycache__|target|dist|build|zig-cache' 2>/dev/null || find . -maxdepth 3 -not -path '*/.git/*' | head -60" },
+		{ "project file", "cat package.json 2>/dev/null || cat Cargo.toml 2>/dev/null || cat go.mod 2>/dev/null || cat pyproject.toml 2>/dev/null || cat Makefile 2>/dev/null || echo 'no project file found'" },
+		{ "entry points", "head -40 $(find . -maxdepth 2 \\( -name 'main.*' -o -name 'index.*' -o -name 'app.*' -o -name 'mod.*' \\) -not -path '*node_modules*' -not -path '*/.git/*' 2>/dev/null | head -3) 2>/dev/null || echo 'none found'" },
+		{ "recent git", "git log --oneline -15 2>/dev/null || echo 'not a git repo'" },
+		{ "README", "head -30 README.md 2>/dev/null || head -30 README 2>/dev/null || echo 'no readme'" },
+	}
+
+	for _, sec in ipairs(sections) do
+		local output = vim.fn.systemlist(sec[2])
+		if #output > 0 then
+			vim.api.nvim_buf_set_lines(ctx, -1, -1, false,
+				{ "", "--- " .. sec[1] .. " ---", "" })
+			vim.api.nvim_buf_set_lines(ctx, -1, -1, false, output)
+		end
+	end
+
+	show_panel()
+	plan_send("I'm new to this project. Explain: what it does, how it's organized, key entry points, where to start reading. Be concise.")
+end, { desc = "cogcog: discover project" })
+
 vim.keymap.set("n", "<leader>cc", function()
 	local buf = get_or_create_ctx()
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
