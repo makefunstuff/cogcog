@@ -1,14 +1,16 @@
 # cogcog cheatsheet
 
-## Verbs (you curate context)
+## Verbs
 
 ```
-ga{motion}          ask (fast, local, you provide code)
-gs{motion}          generate (agent, has tools)
+ga{motion}          ask (fast, local)
+gs{motion}          generate → new buffer (agent, has tools)
+gss                 generate from entire buffer
+gr{motion}          refactor in-place (undo with u)
 <leader>gc{motion}  check (deep, strongest model)
 ```
 
-Visual mode: select → `ga`, `gs`, `<leader>gc`. Close response with `q`.
+Visual mode: select → `ga`, `gs`, `gr`, `<leader>gc`. Close splits with `q`.
 
 ## Planning & context (LLM curates context)
 
@@ -41,15 +43,26 @@ gaip             builds on previous
 <leader>co       close → back to stateless
 ```
 
-## Generate
+## Generate (new buffer)
 
 ```
 gsip             "add error handling"
 gsaf             "rewrite with async/await"
+gss              "scaffold entire module"
 Visual gs        "convert to TypeScript"
 ```
 
 Code buffer with line numbers. `:w filename` to save. Auto-detects language.
+
+## Refactor (in-place)
+
+```
+graf             "simplify this function"
+grip             "convert to async/await"
+Visual gr        "add type annotations"
+```
+
+Replaces code directly. `u` to undo.
 
 ## Check
 

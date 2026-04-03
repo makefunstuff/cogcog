@@ -444,6 +444,127 @@ end, { expr = true, desc = "cogcog: generate from {motion}" })
 
 vim.keymap.set("v", "gs", function() visual_then(gen) end, { desc = "cogcog: generate" })
 
+-- gss: generate from entire buffer (like dd, yy, cc)
+vim.keymap.set("n", "gss", function()
+	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	if #lines == 0 then return end
+	gen(lines, relative_name(vim.api.nvim_buf_get_name(0)))
+end, { desc = "cogcog: generate from buffer" })
+
+-- gr: refactor in-place (replaces selection/motion with LLM output)
+local function refactor(code_lines, source)
+	vim.ui.input({ prompt = " refactor: " }, function(instruction)
+		if not instruction or vim.trim(instruction) == "" then return end
+
+		local input = {}
+		local sys = cogcog_dir .. "/system.md"
+		if vim.fn.filereadable(sys) == 1 then
+			vim.list_extend(input, vim.fn.readfile(sys))
+			table.insert(input, "")
+		end
+		table.insert(input, "--- " .. source .. " ---")
+		table.insert(input, "")
+		vim.list_extend(input, code_lines)
+		table.insert(input, "")
+		table.insert(input, instruction)
+		table.insert(input, "")
+		table.insert(input, "Output ONLY the refactored code. No explanations, no markdown fences, no backticks.")
+
+		local tmp = vim.fn.tempname()
+		vim.fn.writefile(input, tmp)
+
+		vim.notify("cogcog: refactoring...", vim.log.levels.INFO)
+
+		vim.fn.jobstart({ "bash", "-c", cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp) }, {
+			stdout_buffered = true,
+			on_stdout = function(_, data)
+				if not data then return end
+				vim.schedule(function()
+					local result = data
+					-- strip trailing empty strings from jobstart
+					while #result > 0 and result[#result] == "" do table.remove(result) end
+					-- strip code fences if model added them anyway
+					if #result >= 2 then
+						if result[1]:match("^```") then table.remove(result, 1) end
+						if result[#result]:match("^```") then table.remove(result) end
+					end
+					if #result == 0 then
+						vim.notify("cogcog: empty refactor result", vim.log.levels.WARN)
+						return
+					end
+					-- replace the original range
+					local l1, l2 = vim.fn.line("'["), vim.fn.line("']")
+					if l1 == 0 then l1 = vim.fn.line("'<") end
+					if l2 == 0 then l2 = vim.fn.line("'>") end
+					vim.api.nvim_buf_set_lines(0, l1 - 1, l2, false, result)
+					vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines")
+				end)
+			end,
+			on_exit = function()
+				vim.schedule(function() vim.fn.delete(tmp) end)
+			end,
+		})
+	end)
+end
+
+_G._cogcog_refactor_op = make_op(refactor)
+
+vim.keymap.set("n", "gr", function()
+	vim.o.operatorfunc = "v:lua._cogcog_refactor_op"
+	return "g@"
+end, { expr = true, desc = "cogcog: refactor {motion}" })
+
+vim.keymap.set("v", "gr", function()
+	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+	vim.schedule(function()
+		local lines, name, l1, l2 = get_visual_selection()
+		vim.ui.input({ prompt = " refactor: " }, function(instruction)
+			if not instruction or vim.trim(instruction) == "" then return end
+			local input = {}
+			local sys = cogcog_dir .. "/system.md"
+			if vim.fn.filereadable(sys) == 1 then
+				vim.list_extend(input, vim.fn.readfile(sys))
+				table.insert(input, "")
+			end
+			table.insert(input, "--- " .. name .. ":" .. l1 .. "-" .. l2 .. " ---")
+			table.insert(input, "")
+			vim.list_extend(input, lines)
+			table.insert(input, "")
+			table.insert(input, instruction)
+			table.insert(input, "")
+			table.insert(input, "Output ONLY the refactored code. No explanations, no markdown fences, no backticks.")
+
+			local tmp = vim.fn.tempname()
+			vim.fn.writefile(input, tmp)
+			vim.notify("cogcog: refactoring...", vim.log.levels.INFO)
+
+			vim.fn.jobstart({ "bash", "-c", cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp) }, {
+				stdout_buffered = true,
+				on_stdout = function(_, data)
+					if not data then return end
+					vim.schedule(function()
+						local result = data
+						while #result > 0 and result[#result] == "" do table.remove(result) end
+						if #result >= 2 then
+							if result[1]:match("^```") then table.remove(result, 1) end
+							if result[#result]:match("^```") then table.remove(result) end
+						end
+						if #result == 0 then
+							vim.notify("cogcog: empty result", vim.log.levels.WARN)
+							return
+						end
+						vim.api.nvim_buf_set_lines(0, l1 - 1, l2, false, result)
+						vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines")
+					end)
+				end,
+				on_exit = function()
+					vim.schedule(function() vim.fn.delete(tmp) end)
+				end,
+			})
+		end)
+	end)
+end, { desc = "cogcog: refactor selection" })
+
 vim.keymap.set("n", "<leader>gc", function()
 	vim.o.operatorfunc = "v:lua._cogcog_check_op"
 	return "g@"

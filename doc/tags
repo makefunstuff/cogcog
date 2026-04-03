@@ -17,7 +17,9 @@ cogcog-discover	cogcog.txt	/*cogcog-discover*
 cogcog-fast-model	cogcog.txt	/*cogcog-fast-model*
 cogcog-ga	cogcog.txt	/*cogcog-ga*
 cogcog-gc	cogcog.txt	/*cogcog-gc*
+cogcog-gr	cogcog.txt	/*cogcog-gr*
 cogcog-gs	cogcog.txt	/*cogcog-gs*
+cogcog-gss	cogcog.txt	/*cogcog-gss*
 cogcog-improve	cogcog.txt	/*cogcog-improve*
 cogcog-panel	cogcog.txt	/*cogcog-panel*
 cogcog-plan	cogcog.txt	/*cogcog-plan*

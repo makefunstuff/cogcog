@@ -9,24 +9,26 @@ LLM as a vim verb.
 ```
 gaf  → "what does this function do?"     instant answer, stay in your code
 gsaf → "add error handling"              generates code in a new buffer
+graf → "simplify this"                   refactors code in-place (undo with u)
 <leader>gcaf                             deep verification with strongest model
 <C-g> → "let's design the auth flow"    agentic planning (reads files, uses tools)
 <leader>cd                               maps entire project by domain
 ```
 
-## Three verbs
+## Four verbs
 
-| Verb | Role | How |
-|------|------|-----|
-| `ga` | ask / explain | you select code, LLM answers fast |
-| `gs` | generate code | agent backend, can read files and use tools |
-| `<leader>gc` | verify / review | deep analysis with strongest available model |
+| Verb | Role | Output |
+|------|------|--------|
+| `ga` | ask / explain | answer in side split |
+| `gs` / `gss` | generate code | new code buffer |
+| `gr` | refactor in-place | replaces your code (undo with `u`) |
+| `<leader>gc` | verify / review | review in side split |
 
-All compose with motions: `gaip`, `gsaf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
+All compose with motions: `gaip`, `gsaf`, `graf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
 
-With just `ANTHROPIC_API_KEY`, all three work through the Anthropic API. Configure separate backends for cost optimization as needed.
+With just `ANTHROPIC_API_KEY`, all verbs work. Configure separate backends for cost optimization as needed.
 
-> **Note:** `ga` overrides vim's built-in show-ASCII, `gs` overrides sleep, `<C-g>` overrides show-file-info. These are deliberate tradeoffs — the LLM verbs are used far more often.
+> **Note:** `ga` overrides vim's show-ASCII, `gs` overrides sleep, `gr` overrides replace-char, `<C-g>` overrides show-file-info. These are deliberate tradeoffs.
 
 ## Workflows
 
@@ -45,10 +47,21 @@ Visual ga   → "explain the error"
 
 ```
 gsip        → "rewrite in async/await"
+gss         → "scaffold the entire module"       (whole buffer)
 Visual gs   → "add error handling"
 ```
 
 Agent backend with tool calls and web search. Output auto-detects language, strips code fences. `:w filename` to save.
+
+### Refactor (`gr`) — in-place rewrite
+
+```
+graf        → "simplify this function"
+grip        → "convert to async/await"
+Visual gr   → "add type annotations"
+```
+
+Replaces the code directly. Undo with `u`.
 
 ### Check (`<leader>gc`) — deep verification
 
@@ -132,7 +145,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `ga{motion}` | normal | ask about text object |
 | `ga` | visual | ask about selection |
 | `gs{motion}` | normal | generate from text object |
+| `gss` | normal | generate from entire buffer |
 | `gs` | visual | generate from selection |
+| `gr{motion}` | normal | refactor in-place |
+| `gr` | visual | refactor selection in-place |
 | `<leader>gc{motion}` | normal | check text object |
 | `<leader>gc` | visual | check selection |
 | `<C-g>` | normal | plan (agentic, has tools) |

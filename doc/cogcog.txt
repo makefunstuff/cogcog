@@ -35,6 +35,19 @@ gs{motion}      Generate code. Agent backend with tool calling.
                 Use `:w filename` to save. Close with `q`.
                 Planning context is included if non-empty.
 
+                                                *cogcog-gss*
+gss             Generate from entire buffer. Same as `gs` but
+                operates on all lines.
+
+                                                *cogcog-gr*
+gr{motion}      Refactor in-place. Replaces the selected code with
+                the LLM's rewrite. Uses fast local model (--raw).
+
+                Examples: `graf` `grip` `gr3j`
+                Visual: select then `gr`
+
+                Undo with `u`. The original code is in the undo tree.
+
                                                 *cogcog-gc*
 <leader>gc{motion}
                 Check code with strongest model (Opus by default).
@@ -146,7 +159,9 @@ QUICK REFERENCE                                 *cogcog-cheatsheet*
 Verbs (you curate context): >
 
     ga{motion}          ask (fast, local)
-    gs{motion}          generate (agent, tools)
+    gs{motion}          generate → new buffer (agent, tools)
+    gss                 generate from entire buffer
+    gr{motion}          refactor in-place (undo with u)
     <leader>gc{motion}  check (deep, strongest)
 <
 
