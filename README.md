@@ -112,6 +112,11 @@ export COGCOG_AGENT_CMD="pi -p --provider ollama-cloud --model kimi-k2.5"
 
 # check/discover (<leader>gc, <leader>cd): strongest model
 export COGCOG_CHECKER="pi -p --provider anthropic --model opus:xhigh"
+
+# optional
+export COGCOG_MODEL="model-name"        # default model (when FAST_MODEL not set)
+export COGCOG_MAX_TOKENS=8192           # max tokens
+export COGCOG_SYSTEM="be concise"       # system prompt (shell usage)
 ```
 
 ## All keymaps

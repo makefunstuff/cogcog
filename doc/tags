@@ -28,9 +28,12 @@ cogcog-gs	cogcog.txt	/*cogcog-gs*
 cogcog-gss	cogcog.txt	/*cogcog-gss*
 cogcog-gx	cogcog.txt	/*cogcog-gx*
 cogcog-improve	cogcog.txt	/*cogcog-improve*
+cogcog-max-tokens	cogcog.txt	/*cogcog-max-tokens*
+cogcog-model	cogcog.txt	/*cogcog-model*
 cogcog-panel	cogcog.txt	/*cogcog-panel*
 cogcog-plan	cogcog.txt	/*cogcog-plan*
 cogcog-project	cogcog.txt	/*cogcog-project*
+cogcog-system	cogcog.txt	/*cogcog-system*
 cogcog-tutorial	cogcog-tutorial.txt	/*cogcog-tutorial*
 cogcog-tutorial-ask	cogcog-tutorial.txt	/*cogcog-tutorial-ask*
 cogcog-tutorial-check	cogcog-tutorial.txt	/*cogcog-tutorial-check*
