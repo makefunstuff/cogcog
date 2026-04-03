@@ -364,7 +364,7 @@ local function plan_send(question)
 	end
 	show_panel()
 	stream_to_buf(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), ctx, {
-		raw = true,
+		raw = false, -- agent backend: can read files, search, use tools
 		on_done = function()
 			if vim.api.nvim_buf_is_valid(ctx) then
 				-- separator AFTER response, ready for next question
@@ -440,22 +440,7 @@ vim.keymap.set("n", "<C-g>", function()
 		plan_send(nil)
 		return
 	end
-	-- from a code file: auto-pin visible portion as context
-	local name = vim.api.nvim_buf_get_name(buf)
-	if name ~= "" and vim.bo[buf].buftype == "" then
-		local ctx = get_or_create_ctx()
-		local source = relative_name(name)
-		local ctx_text = table.concat(vim.api.nvim_buf_get_lines(ctx, 0, -1, false), "\n")
-		if not ctx_text:find(source, 1, true) then
-			-- pin visible lines only (not entire file)
-			local top = vim.fn.line("w0")
-			local bot = vim.fn.line("w$")
-			local lines = vim.api.nvim_buf_get_lines(buf, top - 1, bot, false)
-			vim.api.nvim_buf_set_lines(ctx, -1, -1, false,
-				{ "", "--- " .. source .. ":" .. top .. "-" .. bot .. " ---", "" })
-			vim.api.nvim_buf_set_lines(ctx, -1, -1, false, lines)
-		end
-	end
+	-- from anywhere: just ask. the agent has tools to read files if needed.
 	vim.ui.input({ prompt = " plan: " }, function(q)
 		if not q or vim.trim(q) == "" then return end
 		plan_send(q)
