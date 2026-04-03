@@ -9,24 +9,24 @@ LLM as a vim verb.
 ```
 gaf  → "what does this function do?"     instant answer, stay in your code
 gsaf → "add error handling"              generates code in a new buffer
-<leader>gcaf                             opus verifies the code
-<C-g> → "let's design the auth flow"    stateful planning conversation
-<leader>cd                               opus maps the entire project
+<leader>gcaf                             deep verification with strongest model
+<C-g> → "let's design the auth flow"    agentic planning (reads files, uses tools)
+<leader>cd                               maps entire project by domain
 ```
 
-## Three verbs
+## Three verbs, three backends
 
-| Verb | Role | Speed |
-|------|------|-------|
-| `ga` | ask / explain | fast (local model) |
-| `gs` | generate code | agentic (tool calls, web search) |
-| `<leader>gc` | verify / review | deep (strongest model) |
+| Verb | Role | Backend |
+|------|------|---------|
+| `ga` | ask / explain | fast local model (you provide context) |
+| `gs` | generate code | agent with tools (reads files, runs commands) |
+| `<leader>gc` | verify / review | strongest model for deep analysis |
 
-All compose with motions: `gaip`, `gsaf`, `<leader>gcaf`. All work in visual mode.
+All compose with motions: `gaip`, `gsaf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
 
 ## Workflows
 
-### Ask (`ga`) — stateless or stateful
+### Ask (`ga`) — you curate, LLM answers
 
 ```
 gaip        → "what does this do?"
@@ -34,26 +34,26 @@ gaf         → "any bugs here?"
 Visual ga   → "explain the error"
 ```
 
-**Panel closed** = one-shot answer in a throwaway split. Quickfix auto-included.
+**Panel closed** = one-shot, throwaway split. Quickfix auto-included.
 **Panel open** = conversation. Questions and answers accumulate.
 
-### Generate (`gs`) — agentic
+### Generate (`gs`) — agent writes code
 
 ```
 gsip        → "rewrite in async/await"
 Visual gs   → "add error handling"
 ```
 
-Agent backend with tool calls. Output auto-detects language, strips code fences. `:w filename` to save.
+Agent backend with tool calls and web search. Output auto-detects language, strips code fences. `:w filename` to save.
 
 ### Check (`<leader>gc`) — deep verification
 
 ```
-<leader>gcaf        opus reviews this function
-Visual <leader>gc   opus reviews selection
+<leader>gcaf        strongest model reviews this function
+Visual <leader>gc   reviews selection
 ```
 
-### Plan (`<C-g>`) — stateful conversation
+### Plan (`<C-g>`) — agentic conversation
 
 ```
 <C-g> → "let's design the auth flow"
@@ -61,15 +61,17 @@ Visual <leader>gc   opus reviews selection
 gsaf  → "implement based on our plan"
 ```
 
-Auto-pins the current file to context when asked from a code buffer.
+Uses the agent backend — can read files, search the codebase, use tools. The LLM decides what's relevant, not you.
+
+Pin specific code manually with `<leader>cy` when you know better.
 
 ### Discover (`<leader>cd`) — project map
 
-One-time deep analysis. Opus maps your project by domain, outputs `gf`-navigable reference saved to `.cogcog/discovery.md`.
+One-time deep analysis. Strongest model maps your project by domain, outputs `gf`-navigable reference saved to `.cogcog/discovery.md`. Update incrementally as the project evolves.
 
 ### Improve (`<leader>cp`) — learn from bad responses
 
-Got a bad response? `<leader>cp` → tell it what was wrong → generates a system prompt fix and appends to `.cogcog/system.md`. Your prompts improve incrementally.
+Got a bad response? `<leader>cp` → tell it what was wrong → appends a fix to `.cogcog/system.md`. Prompts improve incrementally.
 
 ## Install
 
@@ -97,23 +99,23 @@ echo "hello" | cogcog
 
 ## Configuration
 
-Three independent paths. Configure what you need:
+Three independent paths:
 
 ```bash
-# ask (ga): any OpenAI-compatible API — local Ollama, OpenRouter, Groq, etc.
+# ask (ga): any OpenAI-compatible API — local Ollama, OpenRouter, Groq
 export COGCOG_BACKEND=openai
 export COGCOG_API_URL=http://localhost:8090/v1/chat/completions
 export COGCOG_API_KEY=your-key
 export COGCOG_FAST_MODEL="your-fast-model"
 
-# generate (gs): any stdin→stdout CLI with tool calling
+# generate/plan (gs, <C-g>): any stdin→stdout CLI with tool calling
 export COGCOG_CMD="opencode run -m your/model"
 
-# check (gc): configurable via env var
+# check/discover (<leader>gc, <leader>cd): strongest model
 export COGCOG_CHECKER="pi -p --provider anthropic --model opus:xhigh"
 ```
 
-Or use Anthropic for everything (default, no extra config):
+Or use Anthropic for everything (default):
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -129,13 +131,14 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `gs` | visual | generate from selection |
 | `<leader>gc{motion}` | normal | check text object |
 | `<leader>gc` | visual | check selection |
-| `<C-g>` | normal | plan (auto-pins current file) |
+| `<C-g>` | normal | plan (agentic, has tools) |
 | `<leader>cy` | visual | pin selection to context |
 | `<leader>co` | normal | toggle context panel |
-| `<leader>cd` | normal | discover project |
+| `<leader>cd` | normal | discover / update project map |
 | `<leader>cp` | normal | improve prompt from bad response |
 | `<leader>cc` | normal | clear context |
 | `<C-c>` | any | cancel running job |
+| `q` | response | close response split |
 
 ## Context
 

@@ -179,10 +179,13 @@ local function make_split(vertical, buf, statusline)
 	end
 	local win = vim.api.nvim_get_current_win()
 	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_set_option_value("number", false, { win = win })
 	vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
 	vim.api.nvim_set_option_value("wrap", true, { win = win })
 	vim.api.nvim_set_option_value("linebreak", true, { win = win })
 	vim.api.nvim_set_option_value("statusline", statusline, { win = win })
+	-- q to close response splits
+	vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buf, desc = "close" })
 	vim.cmd("wincmd p")
 	return win
 end
@@ -258,7 +261,6 @@ local function ask_send(code_lines, source, question)
 		end
 		if not win then
 			win = make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
-			vim.api.nvim_set_option_value("number", false, { win = win })
 		else
 			vim.api.nvim_set_option_value("statusline", " cogcog ask │ " .. question:sub(1, 40), { win = win })
 		end

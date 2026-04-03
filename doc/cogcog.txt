@@ -8,50 +8,51 @@ INTRODUCTION                                    *cogcog*
 cogcog adds three LLM verbs to vim: ask, generate, check. They compose
 with motions and text objects like any vim operator.
 
+Two context modes: you curate (ga) or the LLM curates (plan/gs/gc).
+
 VERBS                                           *cogcog-verbs*
 
                                                 *cogcog-ga*
-ga{motion}      Ask about code. Fast model. Stateless by default.
-                If the context panel is open, becomes stateful
-                (questions and answers accumulate).
+ga{motion}      Ask about code. Fast local model. You provide the
+                context via selection/motion.
 
-                Examples: `gaip` `gaf` `ga3j`
-                Visual: select then `ga`
+                Stateless by default (throwaway split, reused).
+                If the context panel is open, becomes stateful.
 
                 Quickfix entries are auto-included as context.
+                Response split closes with `q`.
 
                                                 *cogcog-gs*
-gs{motion}      Generate code. Uses agent backend with tool calling.
-                Output goes to a fresh code buffer.
+gs{motion}      Generate code. Agent backend with tool calling.
+                Can read files, run commands, search the web.
+                Output goes to a fresh code buffer with line numbers.
 
-                Examples: `gsip` `gsaf`
-                Visual: select then `gs`
-
-                Auto-detects language from code fences, strips them,
-                sets filetype. Use `:w filename` to save.
+                Auto-detects language from code fences.
+                Use `:w filename` to save. Close with `q`.
                 Planning context is included if non-empty.
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check code with a cloud model (Opus by default).
-                Opens a review in a split.
-
-                Examples: `<leader>gcaf` `<leader>gcip`
-                Visual: select then `<leader>gc`
+                Check code with strongest model (Opus by default).
+                Deep review for correctness, edge cases, bugs.
+                Response split closes with `q`.
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
-<C-g>           From a code file: auto-pins the current file to context
-                (if not already there), prompts for a question, appends
-                to the context panel, sends everything.
+<C-g>           Agentic planning. Uses agent backend — can read
+                files, search the codebase, use tools. The LLM
+                decides what context is relevant.
 
-                From the context panel: sends the buffer as-is. Type
-                your question at the bottom first.
+                From context panel: sends buffer as-is.
+                From any other buffer: prompts for question.
+
+                Pin specific code with <leader>cy when you know
+                better than the LLM what's relevant.
 
                                                 *cogcog-cy*
-<leader>cy      (visual) Pin selection to context panel. Does not send.
-                Use to build up context from multiple files.
+<leader>cy      (visual) Pin selection to context panel. Manual
+                context curation. Does not send.
 
 CONTEXT PANEL                                   *cogcog-panel*
 
@@ -66,8 +67,7 @@ CONTEXT PANEL                                   *cogcog-panel*
                 dap                         delete a section
 <
                                                 *cogcog-cc*
-<leader>cc      Clear context and reload system prompt from
-                `.cogcog/system.md`.
+<leader>cc      Clear context and reload system prompt.
 
                                                 *cogcog-cancel*
 <C-c>           Cancel any running cogcog job. Passes through to
@@ -76,97 +76,65 @@ CONTEXT PANEL                                   *cogcog-panel*
 DISCOVERY                                       *cogcog-discover*
 
                                                 *cogcog-cd*
-<leader>cd      Discover project. Gathers tree, entry points, deps,
-                git log, README. Sends to the checker model for deep
-                analysis.
+<leader>cd      Discover project. Uses strongest model with tool
+                access to read files and map the codebase by domain.
 
-                Output saved to `.cogcog/discovery.md` — a reference
-                organized by domain with gf-navigable file paths.
+                Output saved to `.cogcog/discovery.md` with
+                gf-navigable file paths.
 
-                Run once per project. `<leader>cd` again prompts to
-                open existing or re-discover.
-
-                Yank domain sections into the context panel for
-                focused work.
+                Three options when discovery exists:
+                - Open: view existing map
+                - Update: incremental refresh
+                - Re-discover: full re-analysis
 
 PROMPT IMPROVEMENT                              *cogcog-improve*
 
                                                 *cogcog-cp*
-<leader>cp      Improve system prompt from a bad response. Opens in
-                the buffer with the bad response, asks what was wrong,
-                generates a system prompt instruction, appends it to
-                `.cogcog/system.md`.
-
-                Over time, your system prompt accumulates project-
-                specific instructions learned from real mistakes.
+<leader>cp      Improve prompts from bad responses. Navigate to
+                the bad response, press <leader>cp, describe what
+                was wrong. Generates a system prompt fix and
+                appends to `.cogcog/system.md`.
 
 CONFIGURATION                                   *cogcog-config*
 
-Environment variables:
+Three independent backend paths:
 
-                                                *cogcog-backend*
-COGCOG_BACKEND  API type: "anthropic" (default) or "openai"
-
-                                                *cogcog-api-url*
-COGCOG_API_URL  API endpoint. Any OpenAI-compatible URL works.
-
-                                                *cogcog-api-key*
-COGCOG_API_KEY  API key.
+    ga          COGCOG_FAST_MODEL via COGCOG_API_URL
+    gs/<C-g>    COGCOG_CMD (agent with tools)
+    gc/discover COGCOG_CHECKER (strongest model)
 
                                                 *cogcog-fast-model*
-COGCOG_FAST_MODEL
-                Model for `ga` (ask). Used with --raw flag.
-
-                                                *cogcog-model*
-COGCOG_MODEL    Default model when no FAST_MODEL is set.
+COGCOG_FAST_MODEL   Model for `ga` ask. Used with --raw.
 
                                                 *cogcog-cmd*
-COGCOG_CMD      Agent CLI for `gs` (generate). Any stdin→stdout CLI.
-                Examples:
->
-                opencode run -m opencode/kimi-k2.5
-                claude -p --model sonnet
-                pi -p --provider anthropic --model opus
-<
+COGCOG_CMD          Agent CLI for `gs` and `<C-g>`.
+                    Must be stdin→stdout.
+
                                                 *cogcog-checker*
-COGCOG_CHECKER  CLI for `gc` (check). Env var overrides default.
-                Default: pi -p --provider anthropic --model opus:xhigh
+COGCOG_CHECKER      CLI for `gc` and `<leader>cd`.
+                    Default: pi -p --provider anthropic --model opus:xhigh
 
-                                                *cogcog-system*
-COGCOG_SYSTEM   System prompt text (for shell usage).
+                                                *cogcog-backend*
+COGCOG_BACKEND      API type: "anthropic" (default) or "openai"
 
-                                                *cogcog-max-tokens*
-COGCOG_MAX_TOKENS
-                Max tokens (default: 8192).
+                                                *cogcog-api-url*
+COGCOG_API_URL      API endpoint for raw path.
+
+                                                *cogcog-api-key*
+COGCOG_API_KEY      API key.
 
 PROJECT FILES                                   *cogcog-project*
 
-.cogcog/system.md       System prompt. Auto-loaded into context panel.
-                        Improved incrementally via `<leader>cp`.
+.cogcog/system.md       System prompt. Auto-loaded. Improved via <leader>cp.
 .cogcog/session.md      Auto-saved on exit, restored on open.
-.cogcog/discovery.md    Project map from `<leader>cd`.
+.cogcog/discovery.md    Project map from <leader>cd.
 .cogcog/*.md            Skill templates. `:read` into context.
 
 SHELL USAGE                                     *cogcog-shell*
 >
     echo "explain CRDs" | cogcog
     git diff --staged | cogcog --raw "review this"
-    cat src/main.ts | cogcog "any bugs?"
 <
---raw forces direct API path (bypasses COGCOG_CMD).
-
-THREE MODEL ARCHITECTURE                        *cogcog-models*
-
-cogcog supports three independent model paths:
-
-    ga  fast local model (COGCOG_FAST_MODEL)    quick answers
-    gs  agent backend (COGCOG_CMD)              code generation
-    gc  checker (COGCOG_CHECKER)                deep verification
-
-All configurable. Point to local Ollama, OpenRouter, Anthropic,
-or any OpenAI-compatible API.
-
-Simplest setup — just set ANTHROPIC_API_KEY and everything works
-through the Anthropic API.
+--raw forces direct API (bypasses COGCOG_CMD, uses COGCOG_FAST_MODEL).
 
  vim:tw=78:ts=8:ft=help:norl:

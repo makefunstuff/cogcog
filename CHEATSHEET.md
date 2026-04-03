@@ -1,25 +1,24 @@
 # cogcog cheatsheet
 
-## Verbs
+## Verbs (you curate context)
 
 ```
-ga{motion}          ask (fast, local)
-gs{motion}          generate (agentic)
-<leader>gc{motion}  check (deep, cloud)
+ga{motion}          ask (fast, local, you provide code)
+gs{motion}          generate (agent, has tools)
+<leader>gc{motion}  check (deep, strongest model)
 ```
 
-All work in visual mode: select → `ga`, `gs`, `<leader>gc`.
+Visual mode: select → `ga`, `gs`, `<leader>gc`. Close response with `q`.
 
-## Context & planning
+## Planning & context (LLM curates context)
 
 ```
-<leader>cy       pin selection to context
+<C-g>            plan — agentic, reads files, uses tools
+<leader>cy       pin selection to context (manual override)
 <leader>co       toggle context panel (open = ga becomes stateful)
-<leader>cc       clear context
-<leader>cd       discover project (saves .cogcog/discovery.md, gf-navigable)
+<leader>cd       discover / update project map
 <leader>cp       improve prompt from bad response
-<C-g>            plan — auto-pins current file, prompts, sends
-<C-g> (in panel) send buffer as-is
+<leader>cc       clear context
 <C-c>            cancel running job
 ```
 
@@ -31,14 +30,14 @@ gaf              "any bugs?"
 Visual ga        "explain this error"
 ```
 
-Quickfix auto-included. Throwaway split, cursor stays in your code.
+Quickfix auto-included. Reuses same response split.
 
 ## Deep ask (panel open = stateful)
 
 ```
 <leader>co       open panel
 gaip             appends to conversation
-gaip             builds on previous answer
+gaip             builds on previous
 <leader>co       close → back to stateless
 ```
 
@@ -50,7 +49,7 @@ gsaf             "rewrite with async/await"
 Visual gs        "convert to TypeScript"
 ```
 
-Code buffer. `:w filename` to save. Auto-detects language.
+Code buffer with line numbers. `:w filename` to save. Auto-detects language.
 
 ## Check
 
@@ -63,7 +62,7 @@ Visual <leader>gc        check selection
 ## Plan → Build
 
 ```
-<C-g>            "let's add rate limiting"
+<C-g>            "let's add rate limiting"     (agent reads relevant files)
 <C-g>            "use token bucket"
 gsaf             "implement based on our plan"
 <leader>gcaf     verify
@@ -72,9 +71,9 @@ gsaf             "implement based on our plan"
 ## Discover
 
 ```
-<leader>cd       opus maps the project by domain
-                 gf on any path to open the file
-                 yank domain sections into context
+<leader>cd       maps project by domain (strongest model)
+                 gf on any path to open file
+                 Update option for incremental maintenance
 ```
 
 ## Improve
@@ -104,10 +103,10 @@ git diff | cogcog --raw "review"
 
 ## Config
 
-```bash
-COGCOG_FAST_MODEL   ga: fast model for ask
-COGCOG_CMD          gs: agent CLI (stdin→stdout)
-COGCOG_CHECKER      gc: checker CLI
+```
+COGCOG_FAST_MODEL   ga: fast model (local)
+COGCOG_CMD          gs/<C-g>: agent CLI with tools
+COGCOG_CHECKER      gc/<leader>cd: strongest model
 COGCOG_BACKEND      openai or anthropic
 COGCOG_API_URL      API endpoint
 COGCOG_API_KEY      API key
@@ -118,9 +117,9 @@ COGCOG_API_KEY      API key
 ```
 gd → gaf                    definition → ask about it
 :make → gaip                 build errors → explain
-:grep "TODO" → <C-g>        find TODOs → summarize
 ggVG ga                      explain entire file
-<leader>cy × N → <C-g>      pin from files → ask
+<leader>cy × N → <C-g>      pin from files → plan with context
 gsip → <leader>gcip          generate → verify
 <leader>cd → <C-g>           discover → explore
+<leader>cp                   bad response → improve prompt
 ```
