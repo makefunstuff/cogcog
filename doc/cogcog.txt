@@ -10,6 +10,10 @@ with motions and text objects like any vim operator.
 
 Two context modes: you curate (ga) or the LLM curates (plan/gs/gc).
 
+Note: `ga` overrides vim's built-in show-ASCII, `gs` overrides
+sleep, `<C-g>` overrides show-file-info. These are deliberate
+tradeoffs for frequently-used LLM verbs.
+
 VERBS                                           *cogcog-verbs*
 
                                                 *cogcog-ga*

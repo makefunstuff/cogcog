@@ -14,15 +14,19 @@ gsaf → "add error handling"              generates code in a new buffer
 <leader>cd                               maps entire project by domain
 ```
 
-## Three verbs, three backends
+## Three verbs
 
-| Verb | Role | Backend |
-|------|------|---------|
-| `ga` | ask / explain | fast local model (you provide context) |
-| `gs` | generate code | agent with tools (reads files, runs commands) |
-| `<leader>gc` | verify / review | strongest model for deep analysis |
+| Verb | Role | How |
+|------|------|-----|
+| `ga` | ask / explain | you select code, LLM answers fast |
+| `gs` | generate code | agent backend, can read files and use tools |
+| `<leader>gc` | verify / review | deep analysis with strongest available model |
 
 All compose with motions: `gaip`, `gsaf`, `<leader>gcaf`. All work in visual mode. Response splits close with `q`.
+
+With just `ANTHROPIC_API_KEY`, all three work through the Anthropic API. Configure separate backends for cost optimization as needed.
+
+> **Note:** `ga` overrides vim's built-in show-ASCII, `gs` overrides sleep, `<C-g>` overrides show-file-info. These are deliberate tradeoffs — the LLM verbs are used far more often.
 
 ## Workflows
 
@@ -90,16 +94,16 @@ Requires: `curl`, `jq`.
 
 ## Quickstart
 
-Simplest setup — just Anthropic:
-
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 echo "hello" | cogcog
 ```
 
-## Configuration
+That's it. All verbs work. Configure separate backends below for cost optimization.
 
-Three independent paths:
+## Configuration (optional)
+
+Three independent paths — configure any or none:
 
 ```bash
 # ask (ga): any OpenAI-compatible API — local Ollama, OpenRouter, Groq

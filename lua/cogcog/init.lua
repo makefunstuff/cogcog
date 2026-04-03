@@ -32,6 +32,15 @@ local function stream_to_buf(lines, buf, opts)
 
 	local job = vim.fn.jobstart({ "bash", "-c", shell_cmd }, {
 		stdout_buffered = false,
+		on_stderr = function(_, data)
+			if not data then return end
+			local msg = vim.trim(table.concat(data, "\n"))
+			if msg ~= "" then
+				vim.schedule(function()
+					vim.notify("cogcog: " .. msg:sub(1, 200), vim.log.levels.ERROR)
+				end)
+			end
+		end,
 		on_stdout = function(_, data)
 			if not data then return end
 			vim.schedule(function()
@@ -76,7 +85,7 @@ local function stream_to_buf(lines, buf, opts)
 		end,
 	})
 
-	if job and job > 0 then active_jobs[job] = true end
+	if type(job) == "number" and job > 0 then active_jobs[job] = true end
 	return job
 end
 
@@ -338,7 +347,16 @@ end
 
 -- <leader>gc: check with cloud model
 
-local checker_cmd = vim.env.COGCOG_CHECKER or "pi -p --provider anthropic --model opus:xhigh"
+local function resolve_checker()
+	local env = vim.env.COGCOG_CHECKER
+	if env then return env end
+	-- fallback chain: pi → cogcog --raw
+	if vim.fn.executable("pi") == 1 then
+		return "pi -p --provider anthropic --model opus:xhigh"
+	end
+	return cogcog_bin .. " --raw"
+end
+local checker_cmd = resolve_checker()
 
 local function check_send(code_lines, source)
 	local input = {
