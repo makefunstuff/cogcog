@@ -71,39 +71,52 @@ pg_dump --schema-only mydb | llm "suggest missing indexes"
 
 ## RAG with self-hosted vector databases
 
+You store documents as embeddings (vectors). To search, convert your question to an embedding, find similar documents, feed them to the LLM.
+
 ### Qdrant
 
 ```bash
-# search your knowledge base
-curl -s http://localhost:6333/collections/docs/points/search \
+# 1. embed your question (using a local embedding model via Ollama)
+VECTOR=$(curl -s http://localhost:11434/api/embeddings \
+  -d '{"model":"nomic-embed-text","prompt":"how do we handle auth?"}' \
+  | jq '.embedding')
+
+# 2. search Qdrant for similar documents
+DOCS=$(curl -s http://localhost:6333/collections/docs/points/search \
   -H "Content-Type: application/json" \
-  -d '{"vector": [0.1, 0.2, ...], "limit": 5}' \
-| jq '.result[].payload.text' \
-| llm "answer based on these documents: what's our retry policy?"
+  -d "{\"vector\": $VECTOR, \"limit\": 5}" \
+  | jq -r '.result[].payload.text')
+
+# 3. ask the LLM using the retrieved docs as context
+echo "$DOCS" | llm "based on these documents: how do we handle auth?"
 ```
 
 ### pgvector (PostgreSQL)
 
 ```bash
+# same idea: embed → search → ask
+VECTOR=$(curl -s http://localhost:11434/api/embeddings \
+  -d '{"model":"nomic-embed-text","prompt":"deployment process"}' \
+  | jq -c '.embedding')
+
 psql mydb -c "
-  SELECT content, 1 - (embedding <=> '[0.1, 0.2, ...]') AS similarity
-  FROM documents
-  ORDER BY embedding <=> '[0.1, 0.2, ...]'
+  SELECT content FROM documents
+  ORDER BY embedding <=> '$VECTOR'
   LIMIT 5
-" | llm "based on these results, summarize our deployment process"
+" | llm "summarize our deployment process"
 ```
 
-### Embeddings pipeline
+### One-liner with pipes
 
 ```bash
-# generate embedding for a query
-echo "how do we handle auth?" \
-| llm "output ONLY a JSON array of 384 floats representing this text as an embedding" \
+# embed + search + answer in one pipeline
+curl -s http://localhost:11434/api/embeddings \
+  -d '{"model":"nomic-embed-text","prompt":"retry policy"}' \
+| jq -c '{vector: .embedding, limit: 5}' \
 | curl -s http://localhost:6333/collections/docs/points/search \
-    -H "Content-Type: application/json" \
-    -d @- \
-| jq '.result[].payload.text' \
-| llm "answer the question based on these documents"
+    -H "Content-Type: application/json" -d @- \
+| jq -r '.result[].payload.text' \
+| llm "what's our retry policy?"
 ```
 
 ### Or just grep your docs
