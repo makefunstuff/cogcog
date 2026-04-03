@@ -119,13 +119,187 @@ curl -s http://localhost:11434/api/embeddings \
 | llm "what's our retry policy?"
 ```
 
+### Obsidian vault as knowledge base
+
+Your notes are already on disk. No vector DB needed for most questions:
+
+```bash
+# search across all notes
+grep -rn "kubernetes" ~/vault/ --include="*.md" | llm "summarize what I know about kubernetes"
+
+# find notes about a topic and ask about them
+find ~/vault/ -name "*.md" -exec grep -l "auth" {} \; \
+| xargs cat \
+| llm "based on my notes, what's my preferred auth approach?"
+
+# daily notes as context
+cat ~/vault/daily/2026-04-*.md | llm "summarize what I worked on this month"
+
+# search by tag
+grep -rl "#project/cogcog" ~/vault/ | xargs cat | llm "status update on cogcog"
+```
+
+For large vaults (10k+ notes), index into Qdrant:
+
+```bash
+# index all notes (one-time)
+for f in ~/vault/**/*.md; do
+  TEXT=$(cat "$f")
+  VECTOR=$(curl -s http://localhost:11434/api/embeddings \
+    -d "{\"model\":\"nomic-embed-text\",\"prompt\":$(jq -Rs . <<< "$TEXT")}" \
+    | jq '.embedding')
+  curl -s http://localhost:6333/collections/vault/points \
+    -H "Content-Type: application/json" \
+    -d "{\"points\":[{\"id\":$(md5sum <<< "$f" | cut -c1-8 | xargs printf '%d' 0x),\"vector\":$VECTOR,\"payload\":{\"file\":\"$f\",\"text\":$(jq -Rs . <<< "$TEXT")}}]}"
+done
+
+# then search semantically
+curl -s http://localhost:11434/api/embeddings \
+  -d '{"model":"nomic-embed-text","prompt":"what do I know about rate limiting?"}' \
+| jq -c '{vector: .embedding, limit: 5}' \
+| curl -s http://localhost:6333/collections/vault/points/search \
+    -H "Content-Type: application/json" -d @- \
+| jq -r '.result[].payload.text' \
+| llm "based on my notes, what do I know about rate limiting?"
+```
+
+### Working in your vault with LLMs
+
+Open your vault in Neovim. All cogcog verbs work on markdown:
+
+```
+" open a note
+:e ~/vault/projects/cogcog.md
+
+" explain something you wrote months ago
+gaip                                "what was I thinking here?"
+
+" expand a bullet into a paragraph
+gsip → "expand this into a full explanation"
+
+" refactor messy notes
+<leader>grip → "clean up, keep the information, improve structure"
+
+" generate a note from scratch
+gss → "write a note about kubernetes networking based on what I've learned"
+```
+
+Link discovery across notes:
+
+```
+" find all notes that reference the current topic
+:read !grep -rl "rate limiting" ~/vault/ --include="*.md"
+gaip → "which of these notes are related and how?"
+```
+
+Morning review:
+
+```bash
+cat ~/vault/daily/$(date +%Y-%m-%d).md ~/vault/todo.md | llm "what should I focus on today?"
+```
+
+Weekly summary:
+
+```bash
+cat ~/vault/daily/2026-04-{01..07}.md 2>/dev/null | llm "summarize my week"
+```
+
+Generate links between notes:
+
+```bash
+# find notes that SHOULD link to each other but don't
+find ~/vault/ -name "*.md" -exec grep -l "auth" {} \; \
+| xargs head -5 \
+| llm "which of these notes should reference each other? suggest [[wikilinks]]"
+```
+
+Extract actionable items:
+
+```bash
+cat ~/vault/meetings/2026-04-04.md | llm "extract action items as a checklist"
+```
+
+### Research workflow
+
+Start with a question, build a note iteratively:
+
+```bash
+# 1. search the web
+pi-tavily "eBPF vs iptables performance 2026" > /tmp/research.md
+
+# 2. get an AI summary with citations
+pi-ask "compare eBPF and iptables for packet filtering, with benchmarks" >> /tmp/research.md
+
+# 3. open in vim, start refining
+nvim /tmp/research.md
+```
+
+In Neovim:
+
+```
+" read more sources
+:read !pi-tavily "eBPF XDP benchmarks real world"
+:read !pi-ask "what are the downsides of eBPF?"
+
+" ask about what you've gathered
+gaip → "are these sources contradicting each other?"
+
+" synthesize into a note
+gss → "synthesize all of this into a structured note with sections"
+:w ~/vault/research/ebpf-vs-iptables.md
+```
+
+Cross-reference with your existing knowledge:
+
+```
+:read !grep -rl "eBPF\|iptables\|firewall" ~/vault/ --include="*.md"
+gaip → "what have I already written about this topic?"
+```
+
+Deep dive on a specific claim:
+
+```
+" select a claim in the research note
+Visual ga → "find evidence for or against this. search the web if needed."
+```
+
+Build a literature review:
+
+```bash
+# collect multiple sources
+for q in "eBPF performance" "XDP benchmarks" "eBPF security concerns"; do
+    echo "## $q"
+    pi-tavily "$q" 2>/dev/null | head -20
+    echo ""
+done > /tmp/literature.md
+
+# synthesize
+cat /tmp/literature.md | llm "write a literature review. cite sources. identify gaps."
+```
+
+Progressive refinement loop:
+
+```
+" draft
+gss → "write a technical overview of eBPF for networking"
+
+" critique your own draft
+<leader>gcaf → opus reviews for accuracy
+
+" refine based on critique
+<leader>grip → "address the issues found in the review"
+
+" save
+:w ~/vault/research/ebpf-overview.md
+```
+
 ### Or just grep your docs
 
 ```bash
 grep -rn "retry" docs/ | llm "summarize our retry strategy"
 ```
 
-RAG is for millions of documents. For a codebase, grep is faster and doesn't hallucinate.
+RAG is for millions of documents. For a codebase or a personal vault, grep is faster and doesn't hallucinate.
 
 ## Web search
 
@@ -266,6 +440,200 @@ fi
 | Structured output | `llm \| jq` |
 | Prompt engineering | writing clearly |
 | Fine-tuning | `.cogcog/system.md` |
+
+## Incident response
+
+Alert fires. Gather context from everywhere, diagnose:
+
+```bash
+{
+    echo "## alert"
+    curl -s http://grafana:3000/api/alerts | jq '.[] | select(.state=="alerting")'
+    echo "## recent deploys"
+    git log --oneline --since="2 hours ago"
+    echo "## error logs"
+    kubectl logs deploy/api --since=30m 2>&1 | grep -i "error\|panic\|fatal" | tail -30
+    echo "## resource usage"
+    kubectl top pods -n prod
+} | llm "diagnose: what's causing the alert? what should I do first?"
+```
+
+After fixing, generate the post-mortem:
+
+```bash
+{
+    echo "## timeline"
+    kubectl get events -n prod --sort-by='.lastTimestamp' | tail -30
+    echo "## fix"
+    git log --oneline -3
+    git diff HEAD~1
+} | llm "write an incident post-mortem. timeline, root cause, fix, prevention."
+```
+
+## Automated standup
+
+```bash
+{
+    echo "## yesterday"
+    git log --author="$(git config user.name)" --oneline --since="yesterday"
+    echo "## in progress"
+    git branch --list | grep -v main
+    echo "## blocked"
+    grep -rn "TODO\|FIXME\|BLOCKED" src/ --include="*.go" | tail -10
+} | llm "write a standup update: done, doing, blocked. 3 bullet points max."
+```
+
+## Architecture decision records
+
+After a planning conversation in cogcog:
+
+```vim
+<leader>co
+:w /tmp/discussion.md
+```
+
+```bash
+cat /tmp/discussion.md | llm "extract an ADR from this discussion:
+title, status (accepted), context, decision, consequences.
+use the standard ADR format." > docs/adr/0042-rate-limiting.md
+```
+
+## Learning pipeline
+
+Read docs, generate notes, quiz yourself:
+
+```bash
+# compress a long doc into your vault format
+curl -s https://go.dev/doc/effective_go | llm "compress into concise notes with code examples" \
+  > ~/vault/learning/effective-go.md
+
+# generate flashcards
+cat ~/vault/learning/effective-go.md \
+  | llm "generate 10 flashcards as Q: / A: pairs" \
+  > ~/vault/flashcards/go.md
+
+# quiz yourself
+cat ~/vault/flashcards/go.md | llm "pick 3 random questions, ask me one at a time"
+```
+
+In Neovim — read unfamiliar code as a learning exercise:
+
+```
+gaf → (explains the function)
+3gaf → (detailed explanation with examples)
+Visual ga → "what design pattern is this?"
+Visual ga → "how would I write this differently in Rust?"
+```
+
+## Security audit pipeline
+
+Systematically scan a codebase:
+
+```bash
+# find attack surface
+grep -rn "http.Handle\|gin.GET\|app.post\|router\." src/ \
+  | llm "list all API endpoints and their input parameters"
+
+# check each for vulnerabilities
+for file in src/routes/*.ts; do
+    echo "=== $file ==="
+    cat "$file" | llm "audit for: injection, auth bypass, SSRF, path traversal. be specific."
+done > /tmp/security-audit.md
+
+# prioritize
+cat /tmp/security-audit.md | llm "rank findings by severity. top 3 to fix immediately."
+```
+
+In Neovim:
+
+```
+<leader>gcaf     opus reviews function for security
+Visual ga → "can this input be exploited?"
+```
+
+## Cross-repo comparison
+
+How do two projects solve the same problem?
+
+```bash
+{
+    echo "## project A: auth"
+    cat ~/Work/project-a/src/auth/*.ts
+    echo "## project B: auth"
+    cat ~/Work/project-b/src/auth/*.go
+} | llm "compare these two auth implementations. which is more secure? which handles edge cases better?"
+```
+
+## Reverse engineering APIs
+
+Capture traffic, understand the protocol:
+
+```bash
+# capture API calls
+curl -sv https://api.example.com/users 2>&1 | llm "explain this HTTP exchange"
+
+# compare two API versions
+diff <(curl -s https://api.example.com/v1/users | jq 'keys') \
+     <(curl -s https://api.example.com/v2/users | jq 'keys') \
+| llm "what changed between v1 and v2? any breaking changes?"
+
+# generate a client from observed responses
+curl -s https://api.example.com/users | llm "generate a Go HTTP client struct and methods for this API"
+```
+
+## Config drift detection
+
+Compare running state vs what's committed:
+
+```bash
+# kubernetes
+diff <(kubectl get deploy api -o yaml) <(cat k8s/api-deployment.yaml) \
+  | llm "what drifted? is the running config dangerous?"
+
+# terraform
+terraform plan -no-color 2>&1 | llm "is this drift intentional or did someone kubectl edit?"
+
+# docker
+diff <(docker inspect myapp | jq '.[0].Config') <(cat docker-compose.yml) \
+  | llm "what's different between running container and compose file?"
+```
+
+## Knowledge distillation
+
+Compress long content into your format:
+
+```bash
+# paper → notes
+cat paper.pdf | pdftotext - - | llm "compress into: key findings, methodology, limitations. 1 page max." \
+  > ~/vault/papers/paper-name.md
+
+# video transcript → notes
+yt-dlp --write-sub --skip-download "https://youtube.com/..." -o /tmp/vid
+cat /tmp/vid.*.vtt | llm "compress this transcript into structured notes with timestamps" \
+  > ~/vault/talks/talk-name.md
+
+# book chapter → summary
+cat chapter.txt | llm "summarize in my style: bullet points, code examples, actionable takeaways" \
+  > ~/vault/books/book-chapter.md
+```
+
+## Personal context across projects
+
+Build a cross-project knowledge graph:
+
+```bash
+# what have I been working on?
+for dir in ~/Work/*/; do
+    echo "## $(basename $dir)"
+    git -C "$dir" log --author="$(git config user.name)" --oneline --since="1 month" 2>/dev/null | head -5
+done | llm "summarize my work across all projects this month"
+
+# find patterns across codebases
+for dir in ~/Work/*/; do
+    echo "## $(basename $dir)"
+    grep -rn "func.*error" "$dir/src/" 2>/dev/null | head -5
+done | llm "how do my different projects handle errors? any inconsistencies?"
+```
 
 ## Why this works
 
