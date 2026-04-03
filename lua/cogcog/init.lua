@@ -66,11 +66,12 @@ end
 
 local function gen_send(code_lines, source, instruction)
   local input = {}
-  ctx.with_agent_instructions(input, "gen")
+  ctx.with_system(input)
   ctx.with_selection(input, code_lines, source)
   ctx.with_panel(input)
-  table.insert(input, "--- task ---")
   table.insert(input, instruction)
+  table.insert(input, "")
+  table.insert(input, "Output only the code. No explanations unless asked.")
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
@@ -79,7 +80,7 @@ local function gen_send(code_lines, source, instruction)
   vim.api.nvim_set_option_value("number", true, { win = win })
 
   stream.to_buf(input, buf, {
-    raw = false,
+    raw = true, -- fast: code already selected, no tools needed
     on_done = function()
       if not vim.api.nvim_buf_is_valid(buf) then return end
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
@@ -194,12 +195,11 @@ local function plan_send(question)
     vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", question, "" })
   end
   ctx.show_panel()
-  -- prepend agent instructions to what gets sent (but don't add them to the buffer)
   local input = {}
-  ctx.with_agent_instructions(input, "plan")
+  ctx.with_system(input)
   vim.list_extend(input, vim.api.nvim_buf_get_lines(panel, 0, -1, false))
   stream.to_buf(input, panel, {
-    raw = false,
+    raw = true,
     on_done = function()
       if vim.api.nvim_buf_is_valid(panel) then
         vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", "---", "", "" })
@@ -210,26 +210,29 @@ end
 
 -- exec (gx): agent multi-file work
 
-local function exec_send(instruction, buf, win)
+local function exec_send(instruction)
+  local panel = ctx.get_or_create_panel()
+
+  -- add instruction + context to panel
+  vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", "--- exec: " .. instruction:sub(1, 50) .. " ---", "" })
+
   local input = {}
   ctx.with_agent_instructions(input, "exec")
   ctx.with_current_file(input)
   ctx.with_open_buffers(input)
-  ctx.with_panel(input)
-  table.insert(input, "--- task ---")
-  table.insert(input, instruction)
+  vim.list_extend(input, vim.api.nvim_buf_get_lines(panel, 0, -1, false))
 
-  -- gx uses COGCOG_AGENT_CMD (cloud, heavy) falling back to COGCOG_CMD (local)
+  ctx.show_panel()
+
   local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD
   if not cmd or cmd == "" then cmd = config.cogcog_bin end
 
-  stream.to_buf(input, buf, {
+  stream.to_buf(input, panel, {
     cmd = cmd,
     stderr_to_buf = true,
     on_done = function()
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_option_value("statusline",
-          " ⚡ exec │ done │ :Git diff to review", { win = win })
+      if vim.api.nvim_buf_is_valid(panel) then
+        vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", "---", "", "" })
       end
     end,
   })
@@ -391,27 +394,10 @@ vim.keymap.set("v", "<leader>gc", function() ctx.visual_then(check_send) end, { 
 vim.keymap.set("n", "<C-g>", function()
   local bufname = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
   if bufname:match("%[cogcog%]$") then
+    -- in panel: send as-is
     plan_send(nil)
-  elseif bufname:match("%[cogcog%-exec") then
-    -- continue in exec buffer
-    local buf = vim.api.nvim_get_current_buf()
-    local win = vim.api.nvim_get_current_win()
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    if #lines == 0 or (#lines == 1 and lines[1] == "") then return end
-    vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "---", "" })
-    vim.api.nvim_set_option_value("statusline", " ⚡ exec │ continuing...", { win = win })
-    local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD or config.cogcog_bin
-    stream.to_buf(lines, buf, {
-      cmd = cmd,
-      stderr_to_buf = true,
-      on_done = function()
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_set_option_value("statusline", " ⚡ exec │ done", { win = win })
-        end
-      end,
-    })
   else
-    -- include current filename as hint for the agent
+    -- from code: prompt with filename hint
     local cur_file = ctx.relative_name(vim.api.nvim_buf_get_name(0))
     local hint = cur_file ~= "scratch" and " (in " .. cur_file .. ")" or ""
     vim.ui.input({ prompt = " plan" .. hint .. ": " }, function(q)
@@ -457,14 +443,14 @@ vim.keymap.set("n", "<leader>g.", function()
 end, { desc = "cogcog: review changes" })
 
 vim.keymap.set("n", "<leader>gx", function()
-  vim.ui.input({ prompt = " do: " }, function(instruction)
+  local cur_file = ctx.relative_name(vim.api.nvim_buf_get_name(0))
+  local hint = cur_file ~= "scratch" and " (in " .. cur_file .. ")" or ""
+  vim.ui.input({ prompt = " do" .. hint .. ": " }, function(instruction)
     if not instruction or vim.trim(instruction) == "" then return end
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].filetype = "markdown"
-    vim.bo[buf].buftype = "nofile"
-    vim.api.nvim_buf_set_name(buf, "[cogcog-exec-" .. os.time() .. "]")
-    local win = ctx.make_split(true, buf, " ⚡ exec │ " .. instruction:sub(1, 40))
-    exec_send(instruction, buf, win)
+    if cur_file ~= "scratch" then
+      instruction = "[working in " .. cur_file .. "] " .. instruction
+    end
+    exec_send(instruction)
   end)
 end, { desc = "cogcog: execute" })
 

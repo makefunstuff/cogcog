@@ -24,11 +24,13 @@ function M.to_buf(lines, buf, opts)
   local shell_cmd = (opts.cmd or cogcog_bin) .. flag .. " < " .. vim.fn.shellescape(tmp)
   local first = true
 
-  -- show placeholder in the buffer so it's not blank
+  -- show placeholder (only one, replace existing if present)
   if vim.api.nvim_buf_is_valid(buf) then
     local lc = vim.api.nvim_buf_line_count(buf)
     local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
-    if last == "" then
+    if last:match("^⏳") then
+      -- already has a placeholder, don't add another
+    elseif last == "" then
       vim.api.nvim_buf_set_lines(buf, lc - 1, lc, false, { "⏳ thinking..." })
     else
       vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "⏳ thinking..." })
