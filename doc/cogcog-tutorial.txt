@@ -1,0 +1,146 @@
+*cogcog-tutorial.txt*   Getting started with cogcog
+
+TUTORIAL                                        *cogcog-tutorial*
+
+This walks through your first session with cogcog on a new project.
+
+SETUP                                           *cogcog-tutorial-setup*
+
+Minimal: one env var, one binary. >
+
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
+    echo "hello" | cogcog
+<
+
+Add to Neovim config (lazy.nvim): >
+
+    { dir = "/path/to/cogcog" }
+<
+
+All verbs work with just ANTHROPIC_API_KEY.
+
+MAP THE PROJECT                                 *cogcog-tutorial-discover*
+
+Open a project and run discovery: >
+
+    <leader>cd
+<
+
+Wait 30-60 seconds. The LLM maps your project by domain and
+writes `.cogcog/discovery.md`. The output is gf-navigable —
+cursor on a path, press `gf`, you're in the file.
+
+UNDERSTAND CODE                                 *cogcog-tutorial-ask*
+
+Navigate to a function. Ask about it: >
+
+    gaf → "what does this do?"
+<
+
+A split opens with the answer. Press `q` to close.
+
+These are stateless — each question is independent.
+
+DEEP EXPLORATION                                *cogcog-tutorial-stateful*
+
+Open the context panel for a conversation: >
+
+    <leader>co
+    gaf → "how does token refresh work?"
+    gaf → "what if the refresh token is expired?"
+    gaf → "could this deadlock?"
+<
+
+Panel open = stateful. Each answer builds on the previous.
+Close the panel to return to stateless mode.
+
+CROSS-FILE QUESTIONS                            *cogcog-tutorial-pin*
+
+Pin code from multiple files: >
+
+    " in file A: select → <leader>cy
+    " in file B: select → <leader>cy
+    <C-g> → "can these race?"
+<
+
+Both selections are in the context panel. The LLM sees them
+together.
+
+PLAN A FEATURE                                  *cogcog-tutorial-plan*
+>
+    <C-g> → "I need to add rate limiting"
+    <C-g> → "use token bucket, store in redis"
+<
+
+The agent reads your codebase and discusses the approach.
+Conversation accumulates in the context panel.
+
+GENERATE CODE                                   *cogcog-tutorial-generate*
+>
+    gsaf → "implement rate limiting based on our plan"
+<
+
+Code buffer opens below. Save with `:w filename`. The buffer
+auto-detects language and sets filetype.
+
+VERIFY                                          *cogcog-tutorial-check*
+>
+    <leader>gcaf
+<
+
+Strongest model reviews the code. Press `q` to close.
+
+TEST AND ITERATE                                *cogcog-tutorial-iterate*
+>
+    :make
+    gaip → "why is this failing?"
+    gsaf → "fix it"
+    :make
+    <leader>gcaf
+<
+
+Quickfix errors are auto-included when you `ga`. The LLM sees
+both code and errors.
+
+This is the Ralph loop: generate → test → iterate → verify.
+
+IMPROVE PROMPTS                                 *cogcog-tutorial-improve*
+
+When a response is bad: >
+
+    <leader>cp → "it gave generic advice"
+<
+
+Generates a system prompt fix, appends to `.cogcog/system.md`.
+Prompts improve over time.
+
+PROJECT SKILLS                                  *cogcog-tutorial-skills*
+
+Create `.cogcog/system.md` for project-specific instructions: >
+
+    You are a senior TypeScript engineer.
+    Be concise. Reference file paths. Show code.
+<
+
+Create reusable templates: >
+
+    <!-- .cogcog/review.md -->
+    Review for bugs, security, performance.
+<
+
+Load with `:read .cogcog/review.md` in the context panel.
+
+DAILY WORKFLOW                                  *cogcog-tutorial-daily*
+>
+    gaf             quick understanding
+    gsaf            generate code
+    <leader>gcaf    verify before committing
+    <C-g>           plan a feature
+    <leader>cy      pin for cross-file questions
+    <leader>cd      map a new project
+    q               close response
+    <C-c>           cancel
+<
+
+ vim:tw=78:ts=8:ft=help:norl:

@@ -141,4 +141,35 @@ SHELL USAGE                                     *cogcog-shell*
 <
 --raw forces direct API (bypasses COGCOG_CMD, uses COGCOG_FAST_MODEL).
 
+QUICK REFERENCE                                 *cogcog-cheatsheet*
+
+Verbs (you curate context): >
+
+    ga{motion}          ask (fast, local)
+    gs{motion}          generate (agent, tools)
+    <leader>gc{motion}  check (deep, strongest)
+<
+
+Context & planning (LLM curates context): >
+
+    <C-g>            plan (agentic, reads files)
+    <leader>cy       pin selection to context
+    <leader>co       toggle context panel
+    <leader>cd       discover / update project map
+    <leader>cp       improve prompt from bad response
+    <leader>cc       clear context
+    <C-c>            cancel running job
+    q                close response split
+<
+
+Combos: >
+
+    gd → gaf                    definition → ask
+    :make → gaip                errors → explain
+    ggVG ga                     explain entire file
+    <leader>cy × N → <C-g>     pin from files → plan
+    gsip → <leader>gcip         generate → verify
+    <leader>cd → <C-g>          discover → explore
+<
+
  vim:tw=78:ts=8:ft=help:norl:

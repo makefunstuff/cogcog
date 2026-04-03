@@ -5,6 +5,7 @@ cogcog-backend	cogcog.txt	/*cogcog-backend*
 cogcog-cancel	cogcog.txt	/*cogcog-cancel*
 cogcog-cc	cogcog.txt	/*cogcog-cc*
 cogcog-cd	cogcog.txt	/*cogcog-cd*
+cogcog-cheatsheet	cogcog.txt	/*cogcog-cheatsheet*
 cogcog-checker	cogcog.txt	/*cogcog-checker*
 cogcog-cmd	cogcog.txt	/*cogcog-cmd*
 cogcog-co	cogcog.txt	/*cogcog-co*
@@ -22,5 +23,19 @@ cogcog-panel	cogcog.txt	/*cogcog-panel*
 cogcog-plan	cogcog.txt	/*cogcog-plan*
 cogcog-project	cogcog.txt	/*cogcog-project*
 cogcog-shell	cogcog.txt	/*cogcog-shell*
+cogcog-tutorial	cogcog-tutorial.txt	/*cogcog-tutorial*
+cogcog-tutorial-ask	cogcog-tutorial.txt	/*cogcog-tutorial-ask*
+cogcog-tutorial-check	cogcog-tutorial.txt	/*cogcog-tutorial-check*
+cogcog-tutorial-daily	cogcog-tutorial.txt	/*cogcog-tutorial-daily*
+cogcog-tutorial-discover	cogcog-tutorial.txt	/*cogcog-tutorial-discover*
+cogcog-tutorial-generate	cogcog-tutorial.txt	/*cogcog-tutorial-generate*
+cogcog-tutorial-improve	cogcog-tutorial.txt	/*cogcog-tutorial-improve*
+cogcog-tutorial-iterate	cogcog-tutorial.txt	/*cogcog-tutorial-iterate*
+cogcog-tutorial-pin	cogcog-tutorial.txt	/*cogcog-tutorial-pin*
+cogcog-tutorial-plan	cogcog-tutorial.txt	/*cogcog-tutorial-plan*
+cogcog-tutorial-setup	cogcog-tutorial.txt	/*cogcog-tutorial-setup*
+cogcog-tutorial-skills	cogcog-tutorial.txt	/*cogcog-tutorial-skills*
+cogcog-tutorial-stateful	cogcog-tutorial.txt	/*cogcog-tutorial-stateful*
+cogcog-tutorial.txt	cogcog-tutorial.txt	/*cogcog-tutorial.txt*
 cogcog-verbs	cogcog.txt	/*cogcog-verbs*
 cogcog.txt	cogcog.txt	/*cogcog.txt*
