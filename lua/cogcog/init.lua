@@ -88,11 +88,11 @@ end
 
 local function gen_send(code_lines, source, instruction)
   local input = {}
+  ctx.with_agent_instructions(input, "gen")
   ctx.with_selection(input, code_lines, source)
   ctx.with_panel(input)
+  table.insert(input, "--- task ---")
   table.insert(input, instruction)
-  table.insert(input, "")
-  table.insert(input, "Output only the code. No explanations unless asked.")
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
@@ -217,7 +217,11 @@ local function plan_send(question)
     vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", question, "" })
   end
   ctx.show_panel()
-  stream.to_buf(vim.api.nvim_buf_get_lines(panel, 0, -1, false), panel, {
+  -- prepend agent instructions to what gets sent (but don't add them to the buffer)
+  local input = {}
+  ctx.with_agent_instructions(input, "plan")
+  vim.list_extend(input, vim.api.nvim_buf_get_lines(panel, 0, -1, false))
+  stream.to_buf(input, panel, {
     raw = false,
     on_done = function()
       if vim.api.nvim_buf_is_valid(panel) then
@@ -231,16 +235,18 @@ end
 
 local function exec_send(instruction, buf, win)
   local input = {}
+  ctx.with_agent_instructions(input, "exec")
   ctx.with_current_file(input)
   ctx.with_open_buffers(input)
   ctx.with_panel(input)
-  table.insert(input, "--- instruction ---")
+  table.insert(input, "--- task ---")
   table.insert(input, instruction)
 
   local tmp = vim.fn.tempname()
   vim.fn.writefile(input, tmp)
 
-  local cmd = vim.env.COGCOG_CMD
+  -- gx uses COGCOG_AGENT_CMD (cloud, heavy) falling back to COGCOG_CMD (local)
+  local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD
   if not cmd or cmd == "" then cmd = config.cogcog_bin end
 
   stream.to_buf(input, buf, {
@@ -419,7 +425,7 @@ vim.keymap.set("n", "<C-g>", function()
     if vim.trim(table.concat(lines, "\n")) == "" then return end
     vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "---", "" })
     vim.api.nvim_set_option_value("statusline", " cogcog exec │ continuing...", { win = win })
-    local cmd = vim.env.COGCOG_CMD or config.cogcog_bin
+    local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD or config.cogcog_bin
     stream.to_buf(lines, buf, {
       cmd = cmd,
       stderr_to_buf = true,

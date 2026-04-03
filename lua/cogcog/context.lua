@@ -258,6 +258,41 @@ function M.visual_then(fn)
   end)
 end
 
+function M.with_agent_instructions(input, mode)
+  local instructions = {
+    "Read before you write. Understand existing code before changing it.",
+    "Match the project's style, naming, and conventions.",
+  }
+  if mode == "gen" then
+    vim.list_extend(instructions, {
+      "Explore the relevant code first, then generate.",
+      "Output the final code to stdout.",
+    })
+  elseif mode == "plan" then
+    vim.list_extend(instructions, {
+      "Explore the codebase before answering.",
+      "Reference specific file paths and line numbers.",
+      "Be concrete — suggest exact changes, not vague advice.",
+    })
+  elseif mode == "exec" then
+    vim.list_extend(instructions, {
+      "Read files before making changes.",
+      "Prefer editing existing code over creating new files.",
+      "Run tests after changes if possible.",
+    })
+  end
+  -- load project system prompt if exists
+  local sys = config.cogcog_dir .. "/system.md"
+  if vim.fn.filereadable(sys) == 1 then
+    vim.list_extend(instructions, vim.fn.readfile(sys))
+  end
+  table.insert(input, "--- instructions ---")
+  table.insert(input, "")
+  vim.list_extend(input, instructions)
+  table.insert(input, "")
+  return input
+end
+
 function M.strip_code_fences(result)
   while #result > 0 and result[#result] == "" do table.remove(result) end
   if #result >= 2 then
