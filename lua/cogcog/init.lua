@@ -35,11 +35,12 @@ local function stream_to_buf(lines, buf, opts)
 		on_stderr = function(_, data)
 			if not data then return end
 			local msg = vim.trim(table.concat(data, "\n"))
-			if msg ~= "" then
-				vim.schedule(function()
-					vim.notify("cogcog: " .. msg:sub(1, 200), vim.log.levels.ERROR)
-				end)
-			end
+			msg = msg:gsub("\27%[[%d;]*m", "") -- strip ANSI
+			-- ignore opencode/pi build lines
+			if msg == "" or msg:match("^> build") or msg:match("^%s*$") then return end
+			vim.schedule(function()
+				vim.notify("cogcog: " .. msg:sub(1, 200), vim.log.levels.ERROR)
+			end)
 		end,
 		on_stdout = function(_, data)
 			if not data then return end
@@ -56,6 +57,8 @@ local function stream_to_buf(lines, buf, opts)
 				end
 				for i, chunk in ipairs(data) do
 					chunk = chunk:gsub("\27%[[%d;]*m", "")
+					-- skip opencode/pi build lines
+					if chunk:match("^> build") then chunk = "" end
 					local lc = vim.api.nvim_buf_line_count(buf)
 					if i == 1 then
 						local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
