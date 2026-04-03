@@ -24,8 +24,12 @@ ga{motion}      Explain code. No prompt — instant. Fast local model.
 
                 Auto-includes visible windows and quickfix.
                 Panel open = stateful. Closed = stateless.
+                Response split is reused across calls.
 
                 Visual mode: select then `ga` — prompted.
+
+                                                *cogcog-gaa*
+gaa             Explain entire buffer.
 
                                                 *cogcog-gs*
 gs{motion}      Generate code. Agent backend with tools.
@@ -40,18 +44,18 @@ gss             Generate from entire buffer.
 <leader>gr{motion}
                 Refactor in-place. Fast local model.
                 Replaces the code directly. `u` to undo.
-                Works on code and prose.
+                Works on code and prose. Cancellable with <C-c>.
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check with strongest model. Deep review for
-                correctness, edge cases, bugs.
+                Check with strongest model. Deep review.
+                Response split is reused across calls.
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
 <C-g>           Context-aware:
-                - Code file: prompts, sends to agent (has tools)
+                - Code file: prompts, sends to local agent (has tools)
                 - Context panel: sends buffer as-is
                 - Exec buffer: continues the conversation
 
@@ -61,31 +65,29 @@ PLANNING                                        *cogcog-plan*
 VIM STATE AS CONTEXT                            *cogcog-context*
 
                                                 *cogcog-gj*
-<leader>gj      Ask about jump trail. Gathers code from your
-                last 8 jump locations. "How do these connect?"
+<leader>gj      Ask about jump trail. Last 8 jump locations.
+                Reuses the ask split.
 
                                                 *cogcog-g-dot*
-<leader>g.      Review recent changes. Gathers lines you edited.
-                "Any bugs or issues?"
+<leader>g.      Review recent changes. Lines you edited.
+                Reuses the ask split.
 
 ga auto-includes:
-- Visible code from all windows (your screen layout)
+- Visible code from all windows
 - Quickfix entries (LSP diagnostics, grep, make errors)
 
 EXECUTE                                         *cogcog-exec*
 
                                                 *cogcog-gx*
 <leader>gx      Agent execute. Multi-file work with live activity.
-                Sends current file + open buffer list + context.
+                Uses COGCOG_AGENT_CMD (cloud) or COGCOG_CMD (local).
                 Agent stderr shown in the buffer as progress.
-
                 `<C-g>` in the exec buffer continues the session.
 
 CONTEXT PANEL                                   *cogcog-panel*
 
                                                 *cogcog-co*
 <leader>co      Toggle panel. When open, `ga` becomes stateful.
-                The panel is a regular buffer:
 >
                 :read .cogcog/review.md     add a skill
                 :read !git diff             add tool output
@@ -107,25 +109,30 @@ DISCOVERY                                       *cogcog-discover*
 PROMPT IMPROVEMENT                              *cogcog-improve*
 
                                                 *cogcog-cp*
-<leader>cp      Learn from bad response. Generates instruction,
-                appends to `.cogcog/system.md`.
+<leader>cp      Learn from bad response. Appends fix to
+                `.cogcog/system.md`.
 
 CONFIGURATION                                   *cogcog-config*
 
-Three backend paths:
+Four backend paths:
 
     ga/gr       COGCOG_FAST_MODEL via COGCOG_API_URL (--raw)
-    gs/<C-g>/gx COGCOG_CMD (agent with tools)
+    gs/<C-g>    COGCOG_CMD (local agent with tools)
+    gx          COGCOG_AGENT_CMD (cloud agent, falls back to COGCOG_CMD)
     gc/discover COGCOG_CHECKER (strongest model)
 
                                                 *cogcog-fast-model*
-COGCOG_FAST_MODEL   Model for ask/refactor.
+COGCOG_FAST_MODEL   Model for ask/refactor (fast, local).
 
                                                 *cogcog-cmd*
-COGCOG_CMD          Agent CLI for generate/plan/exec.
+COGCOG_CMD          Local agent CLI for generate/plan.
+
+                                                *cogcog-agent-cmd*
+COGCOG_AGENT_CMD    Cloud agent CLI for execute (<leader>gx).
+                    Falls back to COGCOG_CMD if not set.
 
                                                 *cogcog-checker*
-COGCOG_CHECKER      CLI for check/discover.
+COGCOG_CHECKER      CLI for check/discover (strongest model).
 
                                                 *cogcog-backend*
 COGCOG_BACKEND      "anthropic" (default) or "openai"
@@ -145,18 +152,10 @@ PROJECT FILES                                   *cogcog-project*
 .cogcog/discovery.md    Project map from <leader>cd.
 .cogcog/*.md            Skill templates.
 
-STRUCTURE                                       *cogcog-structure*
-
-    lua/cogcog/init.lua     verbs and keymaps
-    lua/cogcog/stream.lua   shared streaming
-    lua/cogcog/context.lua  input builders, panel, helpers
-    lua/cogcog/config.lua   paths and config
-    bin/cogcog              bash: stdin → LLM → stdout
-
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 
 Verbs: >
-    gaip / 3gaip            explain (count = verbosity)
+    gaip / gaa              explain (count = verbosity)
     Visual ga               ask (prompted)
     gsip / gss              generate → code buffer
     <leader>grip            refactor in-place
@@ -166,7 +165,7 @@ Context: >
     <C-g>                   plan / continue
     <leader>cy              pin selection
     <leader>co              toggle panel
-    <leader>gx              agent execute
+    <leader>gx              agent execute (cloud)
     <leader>gj              jump trail
     <leader>g.              recent changes
     <leader>cd              discover project

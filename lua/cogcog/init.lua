@@ -20,29 +20,7 @@ local function ask_stateless(code_lines, source, question)
   ctx.with_selection(input, code_lines, source)
   table.insert(input, question)
 
-  -- reuse existing ask buffer
-  local buf, win
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog%-ask%]$") then
-      buf = b
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        if vim.api.nvim_win_get_buf(w) == buf then win = w end
-      end
-      break
-    end
-  end
-  if not buf then
-    buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].filetype = "markdown"
-    vim.bo[buf].buftype = "nofile"
-    vim.api.nvim_buf_set_name(buf, "[cogcog-ask]")
-  end
-  if not win then
-    win = ctx.make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
-  else
-    vim.api.nvim_set_option_value("statusline", " cogcog ask │ " .. question:sub(1, 40), { win = win })
-  end
+  local buf = ctx.reuse_or_split("[cogcog-ask]", " 🔍 ask │ " .. question:sub(1, 40))
   stream.to_buf(input, buf, { raw = true })
 end
 
@@ -97,7 +75,7 @@ local function gen_send(code_lines, source, instruction)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].filetype = "markdown"
-  local win = ctx.make_split(false, buf, " cogcog gen │ " .. instruction:sub(1, 40))
+  local win = ctx.make_split(false, buf, " 🔨 gen │ " .. instruction:sub(1, 40))
   vim.api.nvim_set_option_value("number", true, { win = win })
 
   stream.to_buf(input, buf, {
@@ -105,25 +83,22 @@ local function gen_send(code_lines, source, instruction)
     on_done = function()
       if not vim.api.nvim_buf_is_valid(buf) then return end
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-      lines = ctx.strip_code_fences(lines)
-      if #lines > 0 then
+      -- strip leading/trailing blanks
+      while #lines > 0 and vim.trim(lines[1]) == "" do table.remove(lines, 1) end
+      while #lines > 0 and vim.trim(lines[#lines]) == "" do table.remove(lines) end
+      -- detect and strip code fences
+      if #lines >= 2 then
         local lang = lines[1]:match("^```(%w+)")
-        if lang then -- still has fences after strip, shouldn't happen but guard
+        if lang and lines[#lines]:match("^```%s*$") then
           table.remove(lines, 1)
-          if lines[#lines] and lines[#lines]:match("^```") then table.remove(lines) end
+          table.remove(lines)
+          vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+          local ft_map = { js="javascript", ts="typescript", py="python", rb="ruby", rs="rust", sh="bash", yml="yaml" }
+          vim.bo[buf].filetype = ft_map[lang] or lang
         end
       end
-      -- detect lang from first non-empty stripped fence
-      local all_text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-      local detected = all_text:match("^```(%w+)")
-      if detected then
-        lines = ctx.strip_code_fences(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-        vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-        local ft_map = { js="javascript", ts="typescript", py="python", rb="ruby", rs="rust", sh="bash", yml="yaml" }
-        vim.bo[buf].filetype = ft_map[detected] or detected
-      end
       if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_option_value("statusline", " cogcog gen │ done │ :w to save", { win = win })
+        vim.api.nvim_set_option_value("statusline", " 🔨 gen │ done │ :w to save", { win = win })
       end
     end,
   })
@@ -150,40 +125,36 @@ local function refactor_do(lines, source, instruction, l1, l2, target_buf)
   table.insert(input, "Output ONLY the rewritten content. No explanations, no markdown fences.")
   table.insert(input, "Do NOT refuse. Just rewrite it.")
 
-  local tmp = vim.fn.tempname()
-  vim.fn.writefile(input, tmp)
-  vim.notify("cogcog: refactoring...", vim.log.levels.INFO)
+  -- use a hidden scratch buffer to collect the response, then apply
+  local tmp_buf = vim.api.nvim_create_buf(false, true)
+  vim.notify("🔄 refactoring...", vim.log.levels.INFO)
 
-  vim.fn.jobstart({ "bash", "-c", config.cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp) }, {
-    stdout_buffered = true,
-    on_stdout = function(_, data)
-      if not data then return end
-      vim.schedule(function()
-        if not vim.api.nvim_buf_is_valid(target_buf) then
-          vim.notify("cogcog: target buffer closed", vim.log.levels.WARN)
-          return
-        end
-        local result = ctx.strip_code_fences(data)
-        if #result == 0 then
-          vim.notify("cogcog: empty result", vim.log.levels.WARN)
-          return
-        end
-        local text = table.concat(result, " ")
-        if #result <= 2 and (text:match("I do not") or text:match("I cannot") or text:match("I can't")) then
-          vim.notify("cogcog: model refused, original preserved", vim.log.levels.WARN)
-          return
-        end
-        vim.api.nvim_buf_set_lines(target_buf, l1 - 1, l2, false, result)
-        vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
-      end)
-    end,
-    on_exit = function(_, code)
-      vim.schedule(function()
-        vim.fn.delete(tmp)
-        if code ~= 0 then
-          vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
-        end
-      end)
+  stream.to_buf(input, tmp_buf, {
+    raw = true,
+    on_done = function()
+      if not vim.api.nvim_buf_is_valid(tmp_buf) then return end
+      local result = vim.api.nvim_buf_get_lines(tmp_buf, 0, -1, false)
+      vim.api.nvim_buf_delete(tmp_buf, { force = true })
+
+      result = ctx.strip_code_fences(result)
+      while #result > 0 and vim.trim(result[1]) == "" do table.remove(result, 1) end
+      while #result > 0 and vim.trim(result[#result]) == "" do table.remove(result) end
+
+      if #result == 0 then
+        vim.notify("cogcog: empty result", vim.log.levels.WARN)
+        return
+      end
+      local text = table.concat(result, " ")
+      if #result <= 2 and (text:match("I do not") or text:match("I cannot") or text:match("I can't")) then
+        vim.notify("cogcog: model refused, original preserved", vim.log.levels.WARN)
+        return
+      end
+      if not vim.api.nvim_buf_is_valid(target_buf) then
+        vim.notify("cogcog: target buffer closed", vim.log.levels.WARN)
+        return
+      end
+      vim.api.nvim_buf_set_lines(target_buf, l1 - 1, l2, false, result)
+      vim.notify("✓ refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
     end,
   })
 end
@@ -211,10 +182,7 @@ local function check_send(code_lines, source)
     "", "--- " .. source .. " ---", "",
   }
   vim.list_extend(input, code_lines)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].buftype = "nofile"
-  ctx.make_split(true, buf, " cogcog check │ " .. source:sub(1, 30))
+  local buf = ctx.reuse_or_split("[cogcog-check]", " 🛡 check │ " .. source:sub(1, 30))
   stream.to_buf(input, buf, { cmd = config.checker_cmd() })
 end
 
@@ -251,9 +219,6 @@ local function exec_send(instruction, buf, win)
   table.insert(input, "--- task ---")
   table.insert(input, instruction)
 
-  local tmp = vim.fn.tempname()
-  vim.fn.writefile(input, tmp)
-
   -- gx uses COGCOG_AGENT_CMD (cloud, heavy) falling back to COGCOG_CMD (local)
   local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD
   if not cmd or cmd == "" then cmd = config.cogcog_bin end
@@ -264,7 +229,7 @@ local function exec_send(instruction, buf, win)
     on_done = function()
       if vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_set_option_value("statusline",
-          " cogcog exec │ done │ :Git diff to review", { win = win })
+          " ⚡ exec │ done │ :Git diff to review", { win = win })
       end
     end,
   })
@@ -307,7 +272,7 @@ local function do_discover(discovery_file, update)
   vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
   local buf = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_set_option_value("statusline", " cogcog discover │ analyzing...", { win = win })
+  vim.api.nvim_set_option_value("statusline", " 🗺 discover │ analyzing...", { win = win })
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
 
   vim.schedule(function()
@@ -318,7 +283,7 @@ local function do_discover(discovery_file, update)
         vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), discovery_file)
         vim.cmd("edit!")
         if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_set_option_value("statusline", " cogcog discover │ done │ gf to navigate", { win = win })
+          vim.api.nvim_set_option_value("statusline", " 🗺 discover │ done │ gf to navigate", { win = win })
         end
       end,
     })
@@ -328,9 +293,8 @@ end
 -- improve prompt
 
 local function improve_prompt()
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local content = table.concat(lines, "\n")
-  if vim.trim(content) == "" then
+  local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  if #buf_lines == 0 or (#buf_lines == 1 and buf_lines[1] == "") then
     vim.notify("cogcog: nothing to improve from", vim.log.levels.WARN)
     return
   end
@@ -340,27 +304,25 @@ local function improve_prompt()
     local input = {
       "You are a prompt engineer. Bad response below. User feedback follows.",
       "", "Current system prompt:", vim.fn.filereadable(sys_file) == 1 and table.concat(vim.fn.readfile(sys_file), "\n") or "",
-      "", "Bad response:", content,
+      "", "Bad response:", table.concat(buf_lines, "\n"),
       "", "Feedback:", feedback,
       "", "Write ONE instruction to add to the system prompt. Output ONLY the instruction.",
     }
-    local tmp = vim.fn.tempname()
-    vim.fn.writefile(input, tmp)
-    vim.fn.jobstart({ "bash", "-c", config.cogcog_bin .. " --raw < " .. vim.fn.shellescape(tmp) }, {
-      stdout_buffered = true,
-      on_stdout = function(_, data)
-        if not data then return end
-        vim.schedule(function()
-          local improvement = vim.trim(table.concat(data, "\n"))
-          if improvement == "" then return end
-          vim.fn.mkdir(config.cogcog_dir, "p")
-          local existing = vim.fn.filereadable(sys_file) == 1 and vim.fn.readfile(sys_file) or {}
-          table.insert(existing, improvement)
-          vim.fn.writefile(existing, sys_file)
-          vim.notify("cogcog: +" .. improvement:sub(1, 60), vim.log.levels.INFO)
-        end)
+    local tmp_buf = vim.api.nvim_create_buf(false, true)
+    stream.to_buf(input, tmp_buf, {
+      raw = true,
+      on_done = function()
+        if not vim.api.nvim_buf_is_valid(tmp_buf) then return end
+        local result = vim.api.nvim_buf_get_lines(tmp_buf, 0, -1, false)
+        vim.api.nvim_buf_delete(tmp_buf, { force = true })
+        local improvement = vim.trim(table.concat(result, "\n"))
+        if improvement == "" then return end
+        vim.fn.mkdir(config.cogcog_dir, "p")
+        local existing = vim.fn.filereadable(sys_file) == 1 and vim.fn.readfile(sys_file) or {}
+        table.insert(existing, improvement)
+        vim.fn.writefile(existing, sys_file)
+        vim.notify("cogcog: +" .. improvement:sub(1, 60), vim.log.levels.INFO)
       end,
-      on_exit = function() vim.schedule(function() vim.fn.delete(tmp) end) end,
     })
   end)
 end
@@ -389,6 +351,10 @@ vim.keymap.set("n", "ga", function()
   return "g@"
 end, { expr = true, desc = "cogcog: ask" })
 vim.keymap.set("v", "ga", function() ctx.visual_then(ask_prompted) end, { desc = "cogcog: ask" })
+vim.keymap.set("n", "gaa", function()
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  if #lines > 0 then ask(lines, ctx.relative_name(vim.api.nvim_buf_get_name(0))) end
+end, { desc = "cogcog: ask about buffer" })
 
 vim.keymap.set("n", "gs", function()
   vim.o.operatorfunc = "v:lua._cogcog_gen_op"
@@ -431,22 +397,30 @@ vim.keymap.set("n", "<C-g>", function()
     local buf = vim.api.nvim_get_current_buf()
     local win = vim.api.nvim_get_current_win()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    if vim.trim(table.concat(lines, "\n")) == "" then return end
+    if #lines == 0 or (#lines == 1 and lines[1] == "") then return end
     vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", "---", "" })
-    vim.api.nvim_set_option_value("statusline", " cogcog exec │ continuing...", { win = win })
+    vim.api.nvim_set_option_value("statusline", " ⚡ exec │ continuing...", { win = win })
     local cmd = vim.env.COGCOG_AGENT_CMD or vim.env.COGCOG_CMD or config.cogcog_bin
     stream.to_buf(lines, buf, {
       cmd = cmd,
       stderr_to_buf = true,
       on_done = function()
         if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_set_option_value("statusline", " cogcog exec │ done", { win = win })
+          vim.api.nvim_set_option_value("statusline", " ⚡ exec │ done", { win = win })
         end
       end,
     })
   else
-    vim.ui.input({ prompt = " plan: " }, function(q)
-      if q and vim.trim(q) ~= "" then plan_send(q) end
+    -- include current filename as hint for the agent
+    local cur_file = ctx.relative_name(vim.api.nvim_buf_get_name(0))
+    local hint = cur_file ~= "scratch" and " (in " .. cur_file .. ")" or ""
+    vim.ui.input({ prompt = " plan" .. hint .. ": " }, function(q)
+      if not q or vim.trim(q) == "" then return end
+      -- prepend filename context so agent knows where we are
+      if cur_file ~= "scratch" then
+        q = "[working in " .. cur_file .. "] " .. q
+      end
+      plan_send(q)
     end)
   end
 end, { desc = "cogcog: plan / continue" })
@@ -456,7 +430,7 @@ vim.keymap.set("v", "<leader>cy", function()
     local panel = ctx.get_or_create_panel()
     vim.api.nvim_buf_set_lines(panel, -1, -1, false, { "", "--- " .. source .. " ---", "" })
     vim.api.nvim_buf_set_lines(panel, -1, -1, false, lines)
-    vim.notify("cogcog: pinned")
+    vim.notify("📌 pinned")
   end)
 end, { desc = "cogcog: pin" })
 
@@ -469,10 +443,7 @@ vim.keymap.set("n", "<leader>gj", function()
   ctx.with_system(input)
   ctx.with_jumps(input, 8)
   table.insert(input, "How do these code locations connect? What's the flow?")
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].buftype = "nofile"
-  ctx.make_split(true, buf, " cogcog jumps")
+  local buf = ctx.reuse_or_split("[cogcog-ask]", " 🔗 jumps │ investigation trail")
   stream.to_buf(input, buf, { raw = true })
 end, { desc = "cogcog: jump trail" })
 
@@ -481,23 +452,18 @@ vim.keymap.set("n", "<leader>g.", function()
   ctx.with_system(input)
   ctx.with_changes(input)
   table.insert(input, "I made these changes. Any bugs or issues?")
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].buftype = "nofile"
-  ctx.make_split(true, buf, " cogcog changes")
+  local buf = ctx.reuse_or_split("[cogcog-ask]", " 📝 changes │ review edits")
   stream.to_buf(input, buf, { raw = true })
 end, { desc = "cogcog: review changes" })
 
 vim.keymap.set("n", "<leader>gx", function()
-  -- capture current buffer BEFORE creating exec buffer
-  local cur_buf = vim.api.nvim_get_current_buf()
   vim.ui.input({ prompt = " do: " }, function(instruction)
     if not instruction or vim.trim(instruction) == "" then return end
     local buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].filetype = "markdown"
     vim.bo[buf].buftype = "nofile"
     vim.api.nvim_buf_set_name(buf, "[cogcog-exec-" .. os.time() .. "]")
-    local win = ctx.make_split(true, buf, " cogcog exec │ " .. instruction:sub(1, 40))
+    local win = ctx.make_split(true, buf, " ⚡ exec │ " .. instruction:sub(1, 40))
     exec_send(instruction, buf, win)
   end)
 end, { desc = "cogcog: execute" })
@@ -525,7 +491,7 @@ vim.keymap.set("n", "<leader>cc", function()
   if vim.fn.filereadable(sys) == 1 then
     vim.api.nvim_buf_set_lines(panel, 0, -1, false, vim.fn.readfile(sys))
   end
-  vim.notify("cogcog: cleared")
+  vim.notify("🗑 cleared")
 end, { desc = "cogcog: clear" })
 
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
@@ -535,6 +501,13 @@ vim.keymap.set({ "n", "i" }, "<C-c>", function()
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-c>", true, false, true), "n", false)
   end
 end, { desc = "cogcog: cancel" })
+
+-- session restore notification
+if vim.fn.filereadable(config.session_file) == 1 then
+  vim.schedule(function()
+    vim.notify("cogcog: session found (<leader>co to restore)", vim.log.levels.INFO)
+  end)
+end
 
 -- session persistence
 vim.api.nvim_create_autocmd("VimLeavePre", {

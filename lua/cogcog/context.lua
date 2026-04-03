@@ -323,17 +323,44 @@ function M.with_agent_instructions(input, mode)
   return input
 end
 
+-- Reuse a named buffer/split or create new one
+function M.reuse_or_split(name, statusline)
+  local buf
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match(vim.pesc(name) .. "$") then
+      buf = b
+      break
+    end
+  end
+  if not buf then
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].filetype = "markdown"
+    vim.bo[buf].buftype = "nofile"
+    vim.api.nvim_buf_set_name(buf, name)
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+  local win
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(w) == buf then win = w end
+  end
+  if not win then
+    win = M.make_split(true, buf, statusline)
+  else
+    vim.api.nvim_set_option_value("statusline", statusline, { win = win })
+  end
+  return buf, win
+end
+
 -- Strip markdown code fences from output
 function M.strip_code_fences(result)
-  while #result > 0 and result[#result] == "" do table.remove(result) end
+  while #result > 0 and vim.trim(result[1]) == "" do table.remove(result, 1) end
+  while #result > 0 and vim.trim(result[#result]) == "" do table.remove(result) end
   if #result >= 2 then
     if result[1]:match("^```") then table.remove(result, 1) end
     if #result > 0 and result[#result]:match("^```") then table.remove(result) end
   end
   return result
 end
-
-return M
 
 function M.get_or_create_panel()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -450,15 +477,6 @@ function M.with_agent_instructions(input, mode)
   vim.list_extend(input, instructions)
   table.insert(input, "")
   return input
-end
-
-function M.strip_code_fences(result)
-  while #result > 0 and result[#result] == "" do table.remove(result) end
-  if #result >= 2 then
-    if result[1]:match("^```") then table.remove(result, 1) end
-    if #result > 0 and result[#result]:match("^```") then table.remove(result) end
-  end
-  return result
 end
 
 return M

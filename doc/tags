@@ -1,4 +1,5 @@
 cogcog	cogcog.txt	/*cogcog*
+cogcog-agent-cmd	cogcog.txt	/*cogcog-agent-cmd*
 cogcog-api-key	cogcog.txt	/*cogcog-api-key*
 cogcog-api-url	cogcog.txt	/*cogcog-api-url*
 cogcog-backend	cogcog.txt	/*cogcog-backend*
@@ -19,6 +20,7 @@ cogcog-exec	cogcog.txt	/*cogcog-exec*
 cogcog-fast-model	cogcog.txt	/*cogcog-fast-model*
 cogcog-g-dot	cogcog.txt	/*cogcog-g-dot*
 cogcog-ga	cogcog.txt	/*cogcog-ga*
+cogcog-gaa	cogcog.txt	/*cogcog-gaa*
 cogcog-gc	cogcog.txt	/*cogcog-gc*
 cogcog-gj	cogcog.txt	/*cogcog-gj*
 cogcog-gr	cogcog.txt	/*cogcog-gr*
@@ -29,7 +31,6 @@ cogcog-improve	cogcog.txt	/*cogcog-improve*
 cogcog-panel	cogcog.txt	/*cogcog-panel*
 cogcog-plan	cogcog.txt	/*cogcog-plan*
 cogcog-project	cogcog.txt	/*cogcog-project*
-cogcog-structure	cogcog.txt	/*cogcog-structure*
 cogcog-tutorial	cogcog-tutorial.txt	/*cogcog-tutorial*
 cogcog-tutorial-ask	cogcog-tutorial.txt	/*cogcog-tutorial-ask*
 cogcog-tutorial-check	cogcog-tutorial.txt	/*cogcog-tutorial-check*

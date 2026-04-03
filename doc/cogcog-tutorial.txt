@@ -7,7 +7,7 @@ SETUP                                           *cogcog-tutorial-setup*
     export ANTHROPIC_API_KEY="sk-ant-..."
     cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
 <
-Add to Neovim (lazy.nvim): >
+Neovim (lazy.nvim): >
     { dir = "/path/to/cogcog" }
 <
 
@@ -15,72 +15,66 @@ DISCOVER THE PROJECT                            *cogcog-tutorial-discover*
 >
     <leader>cd
 <
-Wait for the strongest model to map your project. Output saved
-to `.cogcog/discovery.md`. Press `gf` on any path to open it.
+Strongest model maps your project. `gf` on paths to navigate.
 
-UNDERSTAND CODE                                 *cogcog-tutorial-ask*
+QUICK EXPLAIN                                   *cogcog-tutorial-ask*
 >
-    gaip            "explain this" (instant, no prompt)
-    3gaip           detailed explanation
-    Visual ga       "is this thread-safe?" (you choose the question)
+    gaip            concise explanation (no prompt)
+    gaa             explain entire buffer
+    3gaip           detailed with examples
+    Visual ga       "is this thread-safe?" (prompted)
 <
-`ga` includes visible windows + quickfix as context automatically.
+Auto-includes visible windows + quickfix. Split reused. `q` to close.
 
-EXPLORE WITH CONVERSATION                       *cogcog-tutorial-explore*
+STATEFUL EXPLORATION                            *cogcog-tutorial-explore*
 >
     <leader>co          open panel (ga becomes stateful)
     gaip                first question
-    gaip                builds on previous answer
+    gaip                builds on previous
     <leader>co          close (back to stateless)
 <
 
-CROSS-FILE QUESTIONS                            *cogcog-tutorial-pin*
+PIN FROM MULTIPLE FILES                         *cogcog-tutorial-pin*
 >
     " file A: visual select → <leader>cy
     " file B: visual select → <leader>cy
     <C-g> → "can these race?"
 <
 
-PLAN A FEATURE                                  *cogcog-tutorial-plan*
+PLAN WITH AGENT                                 *cogcog-tutorial-plan*
 >
-    <C-g> → "add rate limiting"
+    <C-g> → "add rate limiting"     local agent reads files
     <C-g> → "use token bucket"
 <
-Agent reads files to understand your codebase.
 
 GENERATE CODE                                   *cogcog-tutorial-gen*
 >
     gsaf → "implement rate limiting"
+    gss → "scaffold the module"
     :w src/ratelimit.ts
 <
-Code buffer auto-detects language.
 
 REFACTOR IN-PLACE                               *cogcog-tutorial-refactor*
 >
-    <leader>graf → "simplify"
+    <leader>graf → "simplify"       u to undo
 <
-Code replaced directly. `u` to undo.
 
 CHECK                                           *cogcog-tutorial-check*
 >
-    <leader>gcaf
+    <leader>gcaf                    strongest model reviews
 <
-Strongest model reviews for bugs and edge cases.
 
-MULTI-FILE AGENT WORK                           *cogcog-tutorial-exec*
+MULTI-FILE WORK                                 *cogcog-tutorial-exec*
 >
-    <leader>gx → "refactor auth across all files"
+    <leader>gx → "refactor auth"   cloud agent, live activity
+    <C-g>                           continue in exec buffer
 <
-Agent activity streams in real time. `<C-g>` to continue.
 
 INVESTIGATE                                     *cogcog-tutorial-investigate*
 >
     gd → gd → gd       navigate around
-    <leader>gj          "how do these locations connect?"
-<
->
-    " edit some code
-    <leader>g.          "any bugs in my changes?"
+    <leader>gj          how do these connect?
+    <leader>g.          any bugs in my changes?
 <
 
 TEST AND ITERATE                                *cogcog-tutorial-iterate*
@@ -88,7 +82,7 @@ TEST AND ITERATE                                *cogcog-tutorial-iterate*
     gsaf → "implement retry"      generate
     :w src/retry.ts                save
     :make                          test (errors → quickfix)
-    gaip → (quickfix auto)         explain failure
+    gaip                           explain failure (quickfix auto)
     gsaf → "fix it"                iterate
     <leader>gcaf                   verify
 <
@@ -97,6 +91,6 @@ IMPROVE PROMPTS                                 *cogcog-tutorial-improve*
 >
     <leader>cp → "too generic"
 <
-Appends a fix to `.cogcog/system.md`. Prompts improve over time.
+Appends fix to `.cogcog/system.md`.
 
  vim:tw=78:ts=8:ft=help:norl:

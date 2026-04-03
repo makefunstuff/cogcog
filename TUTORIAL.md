@@ -8,11 +8,7 @@ cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
 echo "hello" | cogcog
 ```
 
-Neovim (lazy.nvim):
-
-```lua
-{ dir = "/path/to/cogcog" }
-```
+Neovim (lazy.nvim): `{ dir = "/path/to/cogcog" }`
 
 ## 1. Map the project
 
@@ -20,148 +16,134 @@ Neovim (lazy.nvim):
 <leader>cd
 ```
 
-Wait 30-60 seconds. Output is a `gf`-navigable reference saved to `.cogcog/discovery.md`. Cursor on a path → `gf` → you're in the file.
+Strongest model analyzes your project. Output saved to `.cogcog/discovery.md`. Press `gf` on any path to open the file.
 
-## 2. Understand code
-
-Navigate to a function:
+## 2. Quick explain (no prompt)
 
 ```
-gaip             instant explain (no prompt)
-3gaip            detailed explanation
+gaip             instant explain of this paragraph
+gaf              explain this function
+gaa              explain entire buffer
+3gaip            detailed explanation with examples
 ```
 
-`ga` auto-includes visible windows and quickfix. Press `q` to close the response.
+Response reuses the same side split. `q` to close.
 
-## 3. Ask specific questions
+`ga` auto-includes visible windows and quickfix entries.
 
-Visual select code:
-
-```
-Visual ga → "is this thread-safe?"
-Visual ga → "what happens on timeout?"
-```
-
-## 4. Deep exploration (stateful)
+## 3. Ask a specific question
 
 ```
-<leader>co                 open panel — ga is now stateful
+Visual select → ga → "is this thread-safe?"
+```
+
+## 4. Stateful exploration
+
+```
+<leader>co                 open panel — ga becomes stateful
 gaip                       first question
-gaip                       builds on previous answer
-<leader>co                 close panel — back to stateless
+gaip                       builds on previous
+<leader>co                 close → back to stateless
 ```
 
 ## 5. Pin from multiple files
 
 ```vim
-" in file A: visual select → <leader>cy
-" in file B: visual select → <leader>cy
+" file A: visual select → <leader>cy
+" file B: visual select → <leader>cy
 <C-g> → "can these race?"
 ```
 
-## 6. Plan a feature
+## 6. Plan (agent reads files)
 
 ```
-<C-g> → "I need to add rate limiting"
-<C-g> → "use token bucket, store in redis"
+<C-g> → "add rate limiting"
+<C-g> → "use token bucket"
 ```
 
-Agent reads your codebase and discusses the approach.
+Local agent reads your codebase with tools.
 
 ## 7. Generate code
 
 ```
-gsaf → "implement rate limiting based on our plan"
-:w src/middleware/ratelimit.ts
+gsaf → "implement rate limiting"
+gss → "scaffold the module"
+:w src/ratelimit.ts
 ```
 
-Code buffer auto-detects language and sets filetype.
+Auto-detects language, strips code fences.
 
 ## 8. Refactor in-place
 
 ```
-<leader>graf → "simplify this function"
+<leader>graf → "simplify"
 ```
 
-Code replaced directly. `u` to undo if you don't like it.
+Replaces code directly. `u` to undo.
 
-## 9. Verify
+## 9. Deep check
 
 ```
 <leader>gcaf
 ```
 
-Strongest model reviews for bugs. `q` to close.
+Strongest model reviews. Response reuses split. `q` to close.
 
-## 10. Multi-file agent work
+## 10. Multi-file agent work (cloud)
 
 ```
-<leader>gx → "refactor auth module to use JWT everywhere"
+<leader>gx → "refactor auth across all files"
 ```
 
-Agent activity streams live. `<C-g>` in the exec buffer to continue.
+Cloud agent with live activity. `<C-g>` in the exec buffer to continue.
 
-## 11. Test and iterate
+## 11. Investigate with vim state
+
+```
+gd → gd → gd               navigate around
+<leader>gj                  "how do these locations connect?"
+```
+
+```
+" edit some code
+<leader>g.                  "any bugs in my changes?"
+```
+
+## 12. Test and iterate
 
 ```vim
-:make                               " errors → quickfix
-gaip                                " explain failure (quickfix auto-included)
+:make                       errors → quickfix
+gaip                        explain failure (quickfix auto-included)
 gsaf → "fix it"
 :make
-<leader>gcaf                        " verify
+<leader>gcaf                verify
 ```
 
-## 12. Use your vim state
-
-After navigating around with `gd`, `gr`, `<C-o>`:
+## 13. Improve prompts
 
 ```
-<leader>gj                          " how do these locations connect?
+<leader>cp → "too generic"
 ```
 
-After editing code:
+Appends fix to `.cogcog/system.md`. Prompts improve over time.
+
+## 14. Cancel
 
 ```
-<leader>g.                          " any bugs in my changes?
-```
-
-## 13. Improve prompts over time
-
-Bad response? Fix it permanently:
-
-```
-<leader>cp → "it gave generic advice"
-```
-
-Appends instruction to `.cogcog/system.md`.
-
-## 14. Save sessions
-
-Auto-saves on quit. Save manually:
-
-```vim
-<leader>co
-:w .cogcog/auth-investigation.md
-```
-
-Resume next week:
-
-```vim
-:read .cogcog/auth-investigation.md
-<C-g> → "continuing from where we left off"
+<C-c>                       cancel any running job
 ```
 
 ## Daily workflow
 
 ```
-gaip             quick understanding
-gsaf             generate code
+gaip / gaa       quick understanding
+gsaf / gss       generate code
 <leader>graf     refactor in-place
 <leader>gcaf     verify before commit
-<C-g>            plan a feature
-<leader>gx       multi-file agent work
-<leader>gj       investigate navigation trail
+<C-g>            plan with local agent
+<leader>gx       heavy multi-file work (cloud)
+<leader>gj       investigate jump trail
 <leader>g.       review your changes
 q                close response
-<C-c>            cancel if slow
+<C-c>            cancel
 ```

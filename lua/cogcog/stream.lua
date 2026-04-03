@@ -24,7 +24,16 @@ function M.to_buf(lines, buf, opts)
   local shell_cmd = (opts.cmd or cogcog_bin) .. flag .. " < " .. vim.fn.shellescape(tmp)
   local first = true
 
-  vim.notify("cogcog: thinking...", vim.log.levels.INFO)
+  -- show placeholder in the buffer so it's not blank
+  if vim.api.nvim_buf_is_valid(buf) then
+    local lc = vim.api.nvim_buf_line_count(buf)
+    local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
+    if last == "" then
+      vim.api.nvim_buf_set_lines(buf, lc - 1, lc, false, { "⏳ thinking..." })
+    else
+      vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "⏳ thinking..." })
+    end
+  end
 
   local job = vim.fn.jobstart({ "bash", "-c", shell_cmd }, {
     stdout_buffered = false,
@@ -55,7 +64,7 @@ function M.to_buf(lines, buf, opts)
           }
           for _, pat in ipairs(progress_patterns) do
             if msg:match(pat) then
-              vim.notify("cogcog: " .. msg:sub(1, 120), vim.log.levels.INFO)
+              vim.notify("⚙ " .. msg:sub(1, 120), vim.log.levels.INFO)
               return
             end
           end
@@ -68,9 +77,14 @@ function M.to_buf(lines, buf, opts)
       vim.schedule(function()
         if not vim.api.nvim_buf_is_valid(buf) then return end
         if first then
+          -- clear the "..." placeholder
           local lc = vim.api.nvim_buf_line_count(buf)
           local last = vim.api.nvim_buf_get_lines(buf, lc - 1, lc, false)[1] or ""
-          if last ~= "" then vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "" }) end
+          if last:match("^⏳") then
+            vim.api.nvim_buf_set_lines(buf, lc - 1, lc, false, { "" })
+          elseif last ~= "" then
+            vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "" })
+          end
           first = false
         end
         for i, chunk in ipairs(data) do
@@ -92,10 +106,10 @@ function M.to_buf(lines, buf, opts)
         vim.fn.delete(tmp)
         if job then M.active_jobs[job] = nil end
         if code ~= 0 then
-          vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
+          vim.notify("✗ cogcog exit " .. code, vim.log.levels.ERROR)
           if opts.on_error then opts.on_error(code) end
         else
-          vim.notify("cogcog: done", vim.log.levels.INFO)
+          vim.notify("✓ cogcog done", vim.log.levels.INFO)
           if opts.on_done then opts.on_done() end
         end
       end)
