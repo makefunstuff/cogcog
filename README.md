@@ -122,7 +122,7 @@ echo "explain CRDs" | cogcog
 git diff --staged | cogcog --raw "review this"
 ```
 
-See **[USAGE.md](USAGE.md)** for tricks and patterns. See **[PHILOSOPHY.md](PHILOSOPHY.md)** for why MCP is `curl`. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for practical examples — every "agent feature" done with tools you already have.
+See **[USAGE.md](USAGE.md)** for tricks and patterns. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why MCP is `curl` and every "agent feature" done with tools you already have.
 
 ## Structure
 

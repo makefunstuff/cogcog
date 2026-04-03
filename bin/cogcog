@@ -24,8 +24,10 @@
 set -euo pipefail
 
 # delegate to another CLI if COGCOG_CMD is set
-# pass --raw to bypass and use the built-in API client
+# pass --raw to bypass and use the built-in API client (uses COGCOG_FAST_MODEL)
+_RAW=0
 if [[ "${1:-}" == "--raw" ]]; then
+  _RAW=1
   shift
 elif [[ -n "${COGCOG_CMD:-}" ]]; then
   exec $COGCOG_CMD "$@"
@@ -35,8 +37,8 @@ BACKEND="${COGCOG_BACKEND:-anthropic}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
 SYSTEM="${COGCOG_SYSTEM:-}"
 
-# COGCOG_FAST_MODEL overrides COGCOG_MODEL when --raw is used (for quick ask)
-if [[ -n "${COGCOG_FAST_MODEL:-}" ]]; then
+# --raw uses COGCOG_FAST_MODEL (for quick ask), otherwise COGCOG_MODEL
+if [[ $_RAW -eq 1 && -n "${COGCOG_FAST_MODEL:-}" ]]; then
   _DEFAULT_MODEL="$COGCOG_FAST_MODEL"
 else
   _DEFAULT_MODEL="${COGCOG_MODEL:-}"

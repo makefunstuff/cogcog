@@ -1,6 +1,22 @@
-# Unix Is Your IDE: A Practical Guide
+# Unix Is Your IDE
 
 No frameworks. No SDKs. No MCP servers. Just the tools you already have.
+
+## Why
+
+The LLM is just another Unix filter. It reads text, processes it, writes text. Like `grep`, `sort`, `jq`, `awk` — except it understands natural language.
+
+MCP is a protocol for doing what `|` already does. Tool calling is what `command | llm` already does. RAG is what `grep -rn` already does. Agent memory is what a markdown file already does.
+
+The industry builds complex systems to replicate what Unix gives you for free. The LLM is the new thing. The rest has been solved since the 1970s.
+
+## The cost of abstractions
+
+Every layer between you and the answer adds latency, tokens, money, opacity, and fragility. The Unix approach has a pipe (zero latency), the text you chose (minimal tokens), your judgment (free), full visibility, and no dependencies.
+
+An agent burns 15000 tokens reading 10 files, 80% irrelevant. You `grep -rn "authenticate" src/` and send 50 relevant lines. Better answer, 30x cheaper.
+
+## Practical examples
 
 Every example below works today, on any machine with a shell and an LLM CLI. Replace `llm` with whatever you use — `cogcog`, `claude -p`, `opencode run`, `ollama run`, or a `curl` one-liner.
 
@@ -406,3 +422,19 @@ The LLM is the last filter in the pipeline. Everything before it is standard Uni
 No server. No framework. No protocol. No SDK. No API key management library. No agent orchestration. No vector database. No embedding pipeline.
 
 Just `|`.
+
+## The buzzword translation table
+
+| Buzzword | Unix equivalent |
+|----------|----------------|
+| MCP | `curl`, `grep`, `psql`, any CLI |
+| Tool calling | `command \| llm` |
+| RAG | `grep -rn` |
+| Agent memory | A markdown file |
+| Sub-agents | tmux panes |
+| Context window management | Reading the code yourself and sending what matters |
+| Agentic loop | A while loop (or you closing the loop manually) |
+| Orchestration | A bash script |
+| Structured output | `llm \| jq` |
+| Prompt engineering | Writing clearly |
+| Fine-tuning | A system prompt file |

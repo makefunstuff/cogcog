@@ -241,8 +241,8 @@ local function ask_send(code_lines, source, question)
 		local buf = vim.api.nvim_create_buf(false, true)
 		vim.bo[buf].filetype = "markdown"
 		vim.bo[buf].buftype = "nofile"
-		vim.api.nvim_set_option_value("number", false, { win = 0 })
-		make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
+		local win = make_split(true, buf, " cogcog ask │ " .. question:sub(1, 40))
+		vim.api.nvim_set_option_value("number", false, { win = win })
 		stream_to_buf(input, buf, { raw = true })
 	end
 end
@@ -317,7 +317,7 @@ end
 
 -- <leader>gc: check with cloud model
 
-local checker_cmd = "pi -p --provider anthropic --model opus:xhigh"
+local checker_cmd = vim.env.COGCOG_CHECKER or "pi -p --provider anthropic --model opus:xhigh"
 
 local function check_send(code_lines, source)
 	local input = {
@@ -373,28 +373,20 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
 	end,
 })
 
--- operator functions
+-- operator factory
 
-function _G._cogcog_ask_op(type)
-	local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
-	local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
-	if #lines == 0 then return end
-	ask(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
+local function make_op(fn)
+	return function()
+		local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
+		local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
+		if #lines == 0 then return end
+		fn(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
+	end
 end
 
-function _G._cogcog_gen_op(type)
-	local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
-	local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
-	if #lines == 0 then return end
-	gen(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
-end
-
-function _G._cogcog_check_op(type)
-	local s, e = vim.api.nvim_buf_get_mark(0, "["), vim.api.nvim_buf_get_mark(0, "]")
-	local lines = vim.api.nvim_buf_get_lines(0, s[1] - 1, e[1], false)
-	if #lines == 0 then return end
-	check_send(lines, relative_name(vim.api.nvim_buf_get_name(0)) .. ":" .. s[1] .. "-" .. e[1])
-end
+_G._cogcog_ask_op = make_op(ask)
+_G._cogcog_gen_op = make_op(gen)
+_G._cogcog_check_op = make_op(check_send)
 
 -- keymaps
 
@@ -455,5 +447,11 @@ vim.keymap.set("n", "<leader>cc", function()
 end, { desc = "cogcog: clear" })
 
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
-	cancel_all()
+	if next(active_jobs) then
+		cancel_all()
+	else
+		-- pass through to default <C-c> behavior
+		local key = vim.api.nvim_replace_termcodes("<C-c>", true, false, true)
+		vim.api.nvim_feedkeys(key, "n", false)
+	end
 end, { desc = "cogcog: cancel" })
