@@ -635,6 +635,188 @@ for dir in ~/Work/*/; do
 done | llm "how do my different projects handle errors? any inconsistencies?"
 ```
 
+## Performance profiling
+
+```bash
+# Go pprof → explain bottlenecks
+go tool pprof -top -cum cpu.prof | head -30 | llm "where's the bottleneck? what to optimize first?"
+
+# flame graph text output
+perf script | stackcollapse-perf.pl | head -50 | llm "what's hot? any surprises?"
+
+# Node.js
+node --prof-process isolate-*.log | llm "explain the slow functions"
+```
+
+## Container forensics
+
+```bash
+# why is this image 2GB?
+docker history myapp:latest --no-trunc | llm "which layers are bloated? how to reduce size?"
+
+# what's actually in the image?
+docker export $(docker create myapp:latest) | tar t | head -100 | llm "any files that shouldn't be here?"
+
+# compare two image versions
+diff <(docker inspect myapp:v1 | jq '.[0].Config') \
+     <(docker inspect myapp:v2 | jq '.[0].Config') \
+| llm "what changed between versions?"
+```
+
+## Log correlation across services
+
+```bash
+# trace a request across microservices
+REQ_ID="abc-123"
+{
+    echo "## gateway"
+    kubectl logs deploy/gateway --since=5m | grep "$REQ_ID"
+    echo "## auth"
+    kubectl logs deploy/auth --since=5m | grep "$REQ_ID"
+    echo "## api"
+    kubectl logs deploy/api --since=5m | grep "$REQ_ID"
+    echo "## db"
+    kubectl logs deploy/db --since=5m | grep "$REQ_ID"
+} | llm "trace this request. where did it fail? what's the timeline?"
+```
+
+## Git archaeology
+
+```bash
+# understand why a function evolved
+git log -p --follow -S "handleAuth" -- src/auth.ts | llm "why did this function change over time? what bugs were fixed?"
+
+# find who knows this code best
+git shortlog -sn -- src/auth/ | head -5 | llm "who should I ask about the auth module?"
+
+# suggest commit splits for a large diff
+git diff --staged | llm "this is too big for one commit. suggest how to split into logical commits with messages."
+```
+
+## Diagram generation
+
+```bash
+# code → mermaid
+cat src/routes/*.ts | llm "generate a mermaid sequence diagram showing the request flow"
+
+# architecture → plantuml
+tree -L 2 src/ | llm "generate a plantuml component diagram from this structure"
+
+# database schema → ERD
+pg_dump --schema-only mydb | llm "generate a mermaid ERD diagram"
+```
+
+## Feature flag audit
+
+```bash
+# find all flags
+grep -rn "featureFlag\|isEnabled\|FF_\|FEATURE_" src/ | llm "list all feature flags, which files use them"
+
+# find stale flags (in code but not in config)
+diff <(grep -roh "FF_[A-Z_]*" src/ | sort -u) \
+     <(cat config/flags.json | jq -r 'keys[]' | sort) \
+| llm "which flags are in code but not config (stale)? which are in config but not code (dead)?"
+```
+
+## i18n helper
+
+```bash
+# find untranslated strings
+grep -rn '"[A-Z][a-z].*"' src/components/ --include="*.tsx" \
+| grep -v "import\|console\|className" \
+| llm "which of these look like user-facing strings that need translation?"
+
+# generate translations
+cat src/i18n/en.json | llm "translate all values to Estonian. output as JSON."
+```
+
+## Dependency upgrade planner
+
+```bash
+# check what breaks
+npm outdated --json | llm "which upgrades are safe? which have breaking changes?"
+
+# check changelogs before upgrading
+for pkg in $(npm outdated --parseable | cut -d: -f2 | head -5); do
+    echo "## $pkg"
+    npm view "$pkg" changelog 2>/dev/null | head -20
+done | llm "summarize breaking changes I need to handle"
+```
+
+## Environment parity
+
+```bash
+# staging vs prod
+diff <(ssh staging "env | sort | grep -v SECRET") \
+     <(ssh prod "env | sort | grep -v SECRET") \
+| llm "what's different between staging and prod? any dangerous mismatches?"
+
+# k8s namespace comparison
+diff <(kubectl get all -n staging -o name | sort) \
+     <(kubectl get all -n prod -o name | sort) \
+| llm "what exists in prod but not staging? any risks?"
+```
+
+## API latency analysis
+
+```bash
+# benchmark endpoints
+for ep in /users /orders /health /search; do
+    echo "## $ep"
+    curl -o /dev/null -s -w "time_total: %{time_total}s\ntime_connect: %{time_connect}s\nsize: %{size_download}\n" "https://api.example.com$ep"
+done | llm "which endpoints are slow? what might cause it?"
+```
+
+## Cron job audit
+
+```bash
+# dump all crons
+crontab -l 2>/dev/null
+for user in $(cut -f1 -d: /etc/passwd); do
+    crontab -u "$user" -l 2>/dev/null
+done | llm "any cron jobs that: overlap, run too often, or might conflict?"
+```
+
+## Makefile / systemd generation
+
+```bash
+# describe your build
+echo "Go project with protobuf generation, docker build, and k8s deploy" \
+| llm "write a Makefile with targets: proto, build, test, docker, deploy"
+
+# describe your service
+echo "Go binary at /usr/local/bin/myapp, runs on port 8080, needs DATABASE_URL env var" \
+| llm "write a systemd unit file with restart, logging, and resource limits"
+```
+
+## Pair debugging
+
+When you're stuck — dump everything relevant:
+
+```bash
+{
+    echo "## error"
+    cat /tmp/error.txt
+    echo "## stack trace"
+    cat /tmp/stacktrace.txt
+    echo "## relevant code"
+    cat src/auth/token.ts
+    echo "## recent changes"
+    git diff HEAD~3 -- src/auth/
+    echo "## config"
+    cat .env | grep -v KEY | grep -v SECRET
+} | llm "I'm stuck. diagnose this bug. what's the most likely cause?"
+```
+
+Or in Neovim — pin everything and ask:
+
+```
+<leader>cy          pin the error output
+<leader>cy          pin the relevant function
+<leader>cy          pin the config
+<C-g> → "I'm stuck. what's wrong?"
+```
+
 ## Why this works
 
 The LLM is a Unix filter. It reads text, processes it, writes text. Every layer between you and the answer costs latency, tokens, money, opacity, and fragility.
