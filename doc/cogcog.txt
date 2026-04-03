@@ -1,63 +1,59 @@
 *cogcog.txt*    LLM as a vim verb
 
-Author: makefunstuff
-License: MIT
-
 INTRODUCTION                                    *cogcog*
 
-cogcog adds LLM verbs to vim that compose with motions and text
-objects. Your vim state is context: visible windows, quickfix,
-jump trail, recent changes.
+cogcog adds LLM verbs to vim. They compose with motions and text
+objects. Most verbs run at 0.3s via raw API. Check and execute
+use cloud models for depth.
 
 Note: `ga` overrides show-ASCII, `gs` overrides sleep,
-`<C-g>` overrides show-file-info. Deliberate tradeoffs.
+`<C-g>` overrides show-file-info.
 
-VERBS                                           *cogcog-verbs*
+FAST VERBS (raw API, 0.3s)                      *cogcog-verbs*
 
                                                 *cogcog-ga*
-ga{motion}      Explain code. No prompt — instant. Fast local model.
-                Count controls verbosity:
-                  `gaip`  = concise
-                  `1gaip` = one sentence
-                  `2gaip` = clear
-                  `3gaip` = detailed with examples
-
+ga{motion}      Explain code. No prompt. Count = verbosity:
+                  gaip = concise, 1gaip = 1 sentence, 3gaip = detailed
                 Auto-includes visible windows and quickfix.
                 Panel open = stateful. Closed = stateless.
-                Response split is reused across calls.
-
-                Visual mode: select then `ga` — prompted.
+                Visual: prompted.
 
                                                 *cogcog-gaa*
 gaa             Explain entire buffer.
 
                                                 *cogcog-gs*
-gs{motion}      Generate code. Agent backend with tools.
-                Output in a new code buffer with line numbers.
-                Auto-detects language, strips code fences.
-                `:w filename` to save. `q` to close.
+gs{motion}      Generate code. Raw API (fast). Output in code buffer.
+                Auto-detects language, strips fences. :w to save.
 
                                                 *cogcog-gss*
 gss             Generate from entire buffer.
 
                                                 *cogcog-gr*
 <leader>gr{motion}
-                Refactor in-place. Fast local model.
-                Replaces the code directly. `u` to undo.
-                Works on code and prose. Cancellable with <C-c>.
+                Refactor in-place. u to undo.
+
+CLOUD VERBS                                     *cogcog-cloud*
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check with strongest model. Deep review.
-                Response split is reused across calls.
+                Check with strongest model (opus). 10-90s.
+                Split reused.
+
+                                                *cogcog-gx*
+<leader>gx      Agent execute. Cloud agent with tools. Runs in
+                the context panel. Stderr shows inline as progress.
+                Uses COGCOG_AGENT_CMD.
+
+                                                *cogcog-cd*
+<leader>cd      Discover project. Strongest model.
+                Saved to .cogcog/discovery.md (gf-navigable).
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
-<C-g>           Context-aware:
-                - Code file: prompts, sends to local agent (has tools)
-                - Context panel: sends buffer as-is
-                - Exec buffer: continues the conversation
+<C-g>           Fast conversation (raw API, 0.3s).
+                From code: prompts, shows current filename.
+                From panel: sends as-is.
 
                                                 *cogcog-cy*
 <leader>cy      (visual) Pin selection to context panel.
@@ -65,123 +61,90 @@ PLANNING                                        *cogcog-plan*
 VIM STATE AS CONTEXT                            *cogcog-context*
 
                                                 *cogcog-gj*
-<leader>gj      Ask about jump trail. Last 8 jump locations.
-                Reuses the ask split.
+<leader>gj      Jump trail. Last 8 locations. Reuses ask split.
 
                                                 *cogcog-g-dot*
-<leader>g.      Review recent changes. Lines you edited.
-                Reuses the ask split.
+<leader>g.      Recent changes. Reuses ask split.
 
-ga auto-includes:
-- Visible code from all windows
-- Quickfix entries (LSP diagnostics, grep, make errors)
+ga auto-includes visible windows and quickfix.
 
-EXECUTE                                         *cogcog-exec*
-
-                                                *cogcog-gx*
-<leader>gx      Agent execute. Multi-file work with live activity.
-                Uses COGCOG_AGENT_CMD (cloud) or COGCOG_CMD (local).
-                Agent stderr shown in the buffer as progress.
-                `<C-g>` in the exec buffer continues the session.
-
-CONTEXT PANEL                                   *cogcog-panel*
+PANEL                                           *cogcog-panel*
 
                                                 *cogcog-co*
-<leader>co      Toggle panel. When open, `ga` becomes stateful.
+<leader>co      Toggle. Open = ga stateful.
 >
-                :read .cogcog/review.md     add a skill
+                :read .cogcog/review.md     add skill
                 :read !git diff             add tool output
-                dap                         delete a section
+                dap                         delete section
 <
                                                 *cogcog-cc*
-<leader>cc      Clear context, reload system prompt.
-
-                                                *cogcog-cancel*
-<C-c>           Cancel running jobs. Passes through when idle.
-
-DISCOVERY                                       *cogcog-discover*
-
-                                                *cogcog-cd*
-<leader>cd      Map project by domain using strongest model.
-                Saved to `.cogcog/discovery.md` (gf-navigable).
-                Options: Open / Update / Re-discover.
-
-PROMPT IMPROVEMENT                              *cogcog-improve*
+<leader>cc      Clear, reload system prompt.
 
                                                 *cogcog-cp*
-<leader>cp      Learn from bad response. Appends fix to
-                `.cogcog/system.md`.
+<leader>cp      Improve prompt from bad response.
+
+                                                *cogcog-cancel*
+<C-c>           Cancel jobs. Pass-through when idle.
 
 CONFIGURATION                                   *cogcog-config*
 
-Four backend paths:
-
-    ga/gr       COGCOG_FAST_MODEL via COGCOG_API_URL (--raw)
-    gs/<C-g>    COGCOG_CMD (local agent with tools)
-    gx          COGCOG_AGENT_CMD (cloud agent, falls back to COGCOG_CMD)
-    gc/discover COGCOG_CHECKER (strongest model)
+    ga/gs/gr/<C-g>  COGCOG_FAST_MODEL (raw API, fast)
+    gx              COGCOG_AGENT_CMD (cloud agent with tools)
+    gc/discover     COGCOG_CHECKER (strongest model)
 
                                                 *cogcog-fast-model*
-COGCOG_FAST_MODEL   Model for ask/refactor (fast, local).
-
-                                                *cogcog-cmd*
-COGCOG_CMD          Local agent CLI for generate/plan.
+COGCOG_FAST_MODEL   Fast local model for most verbs.
 
                                                 *cogcog-agent-cmd*
-COGCOG_AGENT_CMD    Cloud agent CLI for execute (<leader>gx).
-                    Falls back to COGCOG_CMD if not set.
+COGCOG_AGENT_CMD    Cloud agent for execute.
 
                                                 *cogcog-checker*
-COGCOG_CHECKER      CLI for check/discover (strongest model).
-
-                                                *cogcog-model*
-COGCOG_MODEL        Default model (when FAST_MODEL not set).
-
-                                                *cogcog-max-tokens*
-COGCOG_MAX_TOKENS   Max tokens (default: 8192).
-
-                                                *cogcog-system*
-COGCOG_SYSTEM       System prompt text (for shell usage).
+COGCOG_CHECKER      Strongest model for check/discover.
 
                                                 *cogcog-backend*
-COGCOG_BACKEND      "anthropic" (default) or "openai"
+COGCOG_BACKEND      "anthropic" or "openai" (default: anthropic)
 
                                                 *cogcog-api-url*
-COGCOG_API_URL      API endpoint for raw path.
+COGCOG_API_URL      API endpoint.
 
                                                 *cogcog-api-key*
 COGCOG_API_KEY      API key.
 
-Simplest setup: just ANTHROPIC_API_KEY. All verbs work.
+                                                *cogcog-model*
+COGCOG_MODEL        Default model when FAST_MODEL not set.
+
+                                                *cogcog-max-tokens*
+COGCOG_MAX_TOKENS   Max tokens (default 8192).
 
 PROJECT FILES                                   *cogcog-project*
 
-.cogcog/system.md       System prompt. Auto-loaded.
+.cogcog/system.md       System prompt. Shared by all verbs.
 .cogcog/session.md      Auto-saved/restored.
-.cogcog/discovery.md    Project map from <leader>cd.
-.cogcog/*.md            Skill templates.
+.cogcog/discovery.md    Project map.
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 
-Verbs: >
-    gaip / gaa              explain (count = verbosity)
-    Visual ga               ask (prompted)
-    gsip / gss              generate → code buffer
-    <leader>grip            refactor in-place
-    <leader>gcip            check (deep)
+Fast (0.3s): >
+    gaip / gaa      explain
+    Visual ga       ask
+    gsip / gss      generate
+    <leader>grip    refactor
+    <C-g>           plan
+    <leader>gj      jumps
+    <leader>g.      changes
 <
-Context: >
-    <C-g>                   plan / continue
-    <leader>cy              pin selection
-    <leader>co              toggle panel
-    <leader>gx              agent execute (cloud)
-    <leader>gj              jump trail
-    <leader>g.              recent changes
-    <leader>cd              discover project
-    <leader>cp              improve prompt
-    <leader>cc              clear
-    <C-c>                   cancel
-    q                       close split
+Cloud: >
+    <leader>gcip    check (opus)
+    <leader>gx      execute (agent)
+    <leader>cd      discover (opus)
+<
+Other: >
+    <leader>cy      pin
+    <leader>co      panel
+    <leader>cp      improve prompt
+    <leader>cc      clear
+    <C-c>           cancel
+    q               close split
 <
 
  vim:tw=78:ts=8:ft=help:norl:

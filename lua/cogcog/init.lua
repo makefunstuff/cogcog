@@ -15,6 +15,9 @@ local ask_verbosity = {
 local function ask_stateless(code_lines, source, question)
   local input = {}
   ctx.with_system(input)
+  -- override system prompt's "output only code" for ask mode
+  table.insert(input, "For this request: explain in natural language. Do NOT output code unless specifically asked.")
+  table.insert(input, "")
   ctx.with_quickfix(input)
   ctx.with_visible(input)
   ctx.with_selection(input, code_lines, source)

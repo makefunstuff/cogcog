@@ -1,46 +1,49 @@
 # cogcog cheatsheet
 
-## Verbs
+## Verbs (all 0.3s via raw API)
 
 ```
 gaip / gaa          explain (no prompt, instant)
 1gaip               one sentence
-3gaip               detailed with examples
+3gaip               detailed
 Visual ga           ask with prompt
-gsip / gss          generate → new buffer (agent)
+gsip / gss          generate → code buffer
 <leader>grip        refactor in-place (u to undo)
-<leader>gcip        check (strongest model)
 ```
 
-All response splits reuse the same window. Close with `q`.
+## Slow verbs (cloud models)
+
+```
+<leader>gcip        check (opus)
+<leader>gx          agent execute (cloud, in panel)
+<leader>cd          discover project (opus)
+```
 
 ## Context from vim state
 
 ```
-<leader>gj          jump trail (investigation)
+<leader>gj          jump trail
 <leader>g.          recent changes
-<leader>gx          agent execute (cloud, sends current file + buffers)
 ```
 
 `ga` auto-includes visible windows + quickfix.
 
-## Planning
+## Planning (fast, in panel)
 
 ```
-<C-g>               plan — local agent, reads files
-<C-g> (in panel)    send buffer as-is
-<C-g> (in exec)     continue conversation
+<C-g>               plan (0.3s, raw API)
+<C-g> (in panel)    send as-is
 ```
 
-## Context management
+## Context
 
 ```
 <leader>cy          pin selection
 <leader>co          toggle panel (open = ga stateful)
-<leader>cc          clear context
-<leader>cd          discover / update project map
+<leader>cc          clear
 <leader>cp          improve prompt from bad response
-<C-c>               cancel job
+<C-c>               cancel
+q                   close split
 ```
 
 ## Native vim
@@ -49,28 +52,25 @@ All response splits reuse the same window. Close with `q`.
 :read .cogcog/review.md     add skill
 :read !git diff --staged    add diff
 dap                         delete section
-:w .cogcog/session.md       save manually
 ```
 
 ## Config
 
 ```
-COGCOG_FAST_MODEL   ga/<leader>gr: fast local model
-COGCOG_CMD          gs/<C-g>: local agent with tools
-COGCOG_AGENT_CMD    <leader>gx: cloud agent (heavy work)
+COGCOG_FAST_MODEL   ga/gs/<C-g>/<leader>gr: fast local model
+COGCOG_AGENT_CMD    <leader>gx: cloud agent with tools
 COGCOG_CHECKER      <leader>gc/<leader>cd: strongest model
 ```
 
 ## Combos
 
 ```
-gaip                        instant explain
-gaa                         explain entire buffer
-gd → gaip                   definition → explain
-:make → gaip                errors → explain (quickfix auto)
-<leader>gj                  where have I been → how connected
-<leader>g.                  what I changed → any bugs
-<leader>cy × N → <C-g>     pin from files → plan
-gsip → <leader>gcip         generate → verify
-<leader>gx → <C-g>         execute → continue
+gaip                instant explain
+gaa                 explain entire buffer
+gd → gaip           definition → explain
+:make → gaip        errors → explain
+<leader>gj          investigate jump trail
+<leader>g.          review changes
+gsip → <leader>gcip generate → verify
+<C-g> → <leader>gx  plan → execute
 ```

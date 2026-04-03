@@ -7,42 +7,42 @@ LLM as a vim verb.
 ## What you can do
 
 ```
-gaip                                 instant explain, zero friction
+gaip                                 instant explain (0.3s, no prompt)
 gaa                                  explain entire buffer
 Visual ga → "is this thread-safe?"   ask a specific question
-gsaf → "add error handling"          generate code in a new buffer
+gsaf → "add error handling"          generate code (0.3s, raw API)
 gss → "scaffold the module"          generate from entire buffer
 <leader>graf → "simplify"            refactor in-place (u to undo)
-<leader>gcaf                         deep verification
-<C-g> → "design the auth flow"       agentic planning (reads files)
-<leader>gx → "refactor auth module"  multi-file agent work (cloud)
-<leader>cd                           map entire project by domain
+<leader>gcaf                         deep check (opus)
+<C-g> → "design the auth flow"       plan in context panel
+<leader>gx → "refactor auth module"  agent execute (cloud, has tools)
+<leader>cd                           map project by domain
 ```
 
 ## Verbs
 
-| Verb | What | Output |
-|------|------|--------|
-| `ga{motion}` / `gaa` | explain (no prompt) | side split (reused) |
-| visual `ga` | ask (prompted) | side split (reused) |
-| `gs{motion}` / `gss` | generate (agent) | code buffer |
-| `<leader>gr{motion}` | refactor in-place | replaces code (`u` to undo) |
-| `<leader>gc{motion}` | deep check | side split (reused) |
+| Verb | What | Speed | Output |
+|------|------|-------|--------|
+| `ga{motion}` / `gaa` | explain | 0.3s | side split (reused) |
+| visual `ga` | ask (prompted) | 0.3s | side split (reused) |
+| `gs{motion}` / `gss` | generate | 0.3s | code buffer |
+| `<leader>gr{motion}` | refactor in-place | 0.3s | replaces code |
+| `<leader>gc{motion}` | deep check | 10-90s | side split (reused) |
 
-Count controls verbosity: `gaip` = concise, `1gaip` = one sentence, `3gaip` = detailed.
+Count controls verbosity: `gaip` concise, `1gaip` one sentence, `3gaip` detailed.
 
-All response splits close with `q` and reuse the same window on next call.
+All splits close with `q` and reuse the same window.
 
 ## Context modes
 
 | Mode | How | Backend |
 |------|-----|---------|
-| **Seamless** | `ga` auto-includes visible windows + quickfix | fast local |
+| **Seamless** | `ga` includes visible windows + quickfix | raw API (fast) |
 | **Explicit** | `<leader>cy` to pin, `:read` to add | you curate |
-| **Agentic** | `<C-g>`, `gs` — LLM reads files with tools | agent (local) |
-| **Cloud** | `<leader>gx` — heavy multi-file work | agent (cloud) |
+| **Planning** | `<C-g>` conversation in panel | raw API (fast) |
+| **Agentic** | `<leader>gx` execute with tools | cloud agent |
 
-Open the panel (`<leader>co`) → `ga` becomes stateful (conversation accumulates).
+Open the panel (`<leader>co`) → `ga` becomes stateful.
 
 ## Vim-native context
 
@@ -56,13 +56,13 @@ Open the panel (`<leader>co`) → `ga` becomes stateful (conversation accumulate
 ## Planning & execution
 
 ```
-<C-g> → "add rate limiting"          local agent reads your codebase
-<C-g> → "use token bucket"           conversation accumulates
-gsaf → "implement the plan"          generate from context
-<leader>gx → "refactor auth module"  cloud agent, multi-file work
+<C-g> → "add rate limiting"          fast conversation (raw API)
+<C-g> → "use token bucket"           continues in panel
+<leader>gx → "implement it"          cloud agent executes (also in panel)
+gsaf → "implement this function"     fast code generation (raw API)
 ```
 
-`<C-g>` in an exec buffer continues the conversation.
+Both `<C-g>` and `<leader>gx` work in the same context panel. Plan fast, execute with agent when you need tools.
 
 ## Discovery
 
@@ -95,28 +95,23 @@ All verbs work. Configure separate backends below for cost optimization.
 
 ## Configuration
 
-Four independent paths — configure any or none:
-
 ```bash
-# ask/refactor (ga, <leader>gr): any OpenAI-compatible API
+# fast path (ga, gs, <C-g>, <leader>gr): any OpenAI-compatible API
 export COGCOG_BACKEND=openai
 export COGCOG_API_URL=http://localhost:8090/v1/chat/completions
 export COGCOG_API_KEY=your-key
 export COGCOG_FAST_MODEL="your-model"
 
-# generate/plan (gs, <C-g>): local agent CLI with tools
-export COGCOG_CMD="pi -p --provider gemma4 --model gemma-4-E4B-it-Q4_K_M"
-
-# execute (<leader>gx): cloud agent for heavy multi-file work
+# agent execute (<leader>gx): cloud agent with tools
 export COGCOG_AGENT_CMD="pi -p --provider ollama-cloud --model kimi-k2.5"
 
 # check/discover (<leader>gc, <leader>cd): strongest model
 export COGCOG_CHECKER="pi -p --provider anthropic --model opus:xhigh"
 
 # optional
-export COGCOG_MODEL="model-name"        # default model (when FAST_MODEL not set)
-export COGCOG_MAX_TOKENS=8192           # max tokens
-export COGCOG_SYSTEM="be concise"       # system prompt (shell usage)
+export COGCOG_MODEL="model-name"        # default when FAST_MODEL not set
+export COGCOG_MAX_TOKENS=8192
+export COGCOG_SYSTEM="be concise"       # shell system prompt
 ```
 
 ## All keymaps
@@ -132,10 +127,10 @@ export COGCOG_SYSTEM="be concise"       # system prompt (shell usage)
 | `<leader>gr` | v | refactor selection |
 | `<leader>gc{motion}` | n | check with strongest model |
 | `<leader>gc` | v | check selection |
-| `<C-g>` | n | plan / continue exec buffer |
+| `<C-g>` | n | plan (fast, in panel) |
 | `<leader>cy` | v | pin to context |
 | `<leader>co` | n | toggle context panel |
-| `<leader>gx` | n | agent execute (multi-file, cloud) |
+| `<leader>gx` | n | agent execute (cloud, in panel) |
 | `<leader>gj` | n | ask about jump trail |
 | `<leader>g.` | n | review recent changes |
 | `<leader>cd` | n | discover / update project |
@@ -161,19 +156,16 @@ echo "explain CRDs" | cogcog
 git diff --staged | cogcog --raw "review this"
 ```
 
-See **[TUTORIAL.md](TUTORIAL.md)** to get started. See **[USAGE.md](USAGE.md)** for tricks. See **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)** for why `|` is the only protocol you need.
-
-`:help cogcog` inside Neovim.
+See **[TUTORIAL.md](TUTORIAL.md)**, **[USAGE.md](USAGE.md)**, **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)**. Run `:help cogcog` in Neovim.
 
 ## Structure
 
 ```
 bin/cogcog                  # bash: stdin → LLM → stdout
 lua/cogcog/init.lua         # verbs and keymaps
-lua/cogcog/stream.lua       # shared streaming (one implementation)
-lua/cogcog/context.lua      # input builders, panel, split helpers
+lua/cogcog/stream.lua       # shared streaming
+lua/cogcog/context.lua      # input builders, panel, helpers
 lua/cogcog/config.lua       # paths and config
 doc/cogcog.txt              # :help cogcog
-doc/cogcog-tutorial.txt     # :help cogcog-tutorial
 .cogcog/                    # project prompts and templates
 ```

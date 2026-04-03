@@ -1,96 +1,58 @@
-*cogcog-tutorial.txt*   Getting started with cogcog
-
-TUTORIAL                                        *cogcog-tutorial*
+*cogcog-tutorial.txt*   Getting started
 
 SETUP                                           *cogcog-tutorial-setup*
 >
     export ANTHROPIC_API_KEY="sk-ant-..."
     cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
 <
-Neovim (lazy.nvim): >
+Neovim: >
     { dir = "/path/to/cogcog" }
 <
 
-DISCOVER THE PROJECT                            *cogcog-tutorial-discover*
+EXPLAIN (0.3s)                                  *cogcog-tutorial-ask*
 >
-    <leader>cd
-<
-Strongest model maps your project. `gf` on paths to navigate.
-
-QUICK EXPLAIN                                   *cogcog-tutorial-ask*
->
-    gaip            concise explanation (no prompt)
-    gaa             explain entire buffer
-    3gaip           detailed with examples
-    Visual ga       "is this thread-safe?" (prompted)
-<
-Auto-includes visible windows + quickfix. Split reused. `q` to close.
-
-STATEFUL EXPLORATION                            *cogcog-tutorial-explore*
->
-    <leader>co          open panel (ga becomes stateful)
-    gaip                first question
-    gaip                builds on previous
-    <leader>co          close (back to stateless)
+    gaip            concise (no prompt)
+    gaa             entire buffer
+    3gaip           detailed
+    Visual ga       prompted
 <
 
-PIN FROM MULTIPLE FILES                         *cogcog-tutorial-pin*
+PLAN (fast)                                     *cogcog-tutorial-plan*
 >
-    " file A: visual select → <leader>cy
-    " file B: visual select → <leader>cy
-    <C-g> → "can these race?"
-<
-
-PLAN WITH AGENT                                 *cogcog-tutorial-plan*
->
-    <C-g> → "add rate limiting"     local agent reads files
+    <C-g> → "add rate limiting"
     <C-g> → "use token bucket"
 <
 
-GENERATE CODE                                   *cogcog-tutorial-gen*
+GENERATE (0.3s)                                 *cogcog-tutorial-gen*
 >
-    gsaf → "implement rate limiting"
-    gss → "scaffold the module"
-    :w src/ratelimit.ts
+    gsaf → "implement it"
+    :w src/file.ts
 <
 
-REFACTOR IN-PLACE                               *cogcog-tutorial-refactor*
+REFACTOR                                        *cogcog-tutorial-refactor*
 >
     <leader>graf → "simplify"       u to undo
 <
 
-CHECK                                           *cogcog-tutorial-check*
+CHECK (opus)                                    *cogcog-tutorial-check*
 >
-    <leader>gcaf                    strongest model reviews
+    <leader>gcaf
 <
 
-MULTI-FILE WORK                                 *cogcog-tutorial-exec*
+EXECUTE (cloud agent)                           *cogcog-tutorial-exec*
 >
-    <leader>gx → "refactor auth"   cloud agent, live activity
-    <C-g>                           continue in exec buffer
+    <leader>gx → "refactor auth"   in context panel
 <
 
 INVESTIGATE                                     *cogcog-tutorial-investigate*
 >
-    gd → gd → gd       navigate around
-    <leader>gj          how do these connect?
-    <leader>g.          any bugs in my changes?
+    <leader>gj          jump trail
+    <leader>g.          recent changes
 <
 
-TEST AND ITERATE                                *cogcog-tutorial-iterate*
+ITERATE                                         *cogcog-tutorial-iterate*
 >
-    gsaf → "implement retry"      generate
-    :w src/retry.ts                save
-    :make                          test (errors → quickfix)
-    gaip                           explain failure (quickfix auto)
-    gsaf → "fix it"                iterate
-    <leader>gcaf                   verify
+    :make → gaip → gsaf → :make → <leader>gcaf
 <
-
-IMPROVE PROMPTS                                 *cogcog-tutorial-improve*
->
-    <leader>cp → "too generic"
-<
-Appends fix to `.cogcog/system.md`.
 
  vim:tw=78:ts=8:ft=help:norl:

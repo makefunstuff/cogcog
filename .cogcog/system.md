@@ -7,4 +7,4 @@ Rules:
 - Delete more than you add. Dead code, stale abstractions, unused imports — remove them.
 - No comments explaining what code does. Comment only the "why" if obscure.
 - If you don't know, say so.
-- Output only the code. No explanations unless asked.
+- Be concise. Show code when relevant, explain when asked.
