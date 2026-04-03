@@ -414,6 +414,13 @@ vim.keymap.set("v", "<leader>gc", function()
 end, { desc = "cogcog: check selection" })
 
 vim.keymap.set("n", "<C-g>", function()
+	-- if in context panel, send buffer as-is (question is already typed)
+	local buf = vim.api.nvim_get_current_buf()
+	if vim.api.nvim_buf_get_name(buf):match("%[cogcog%]$") then
+		plan_send(nil)
+		return
+	end
+	-- otherwise prompt for question
 	vim.ui.input({ prompt = " plan: " }, function(q)
 		if not q or vim.trim(q) == "" then return end
 		plan_send(q)
@@ -435,37 +442,137 @@ vim.keymap.set("n", "<leader>co", function()
 	else show_panel() end
 end, { desc = "cogcog: toggle panel" })
 
--- <leader>cd: discover — auto-gather project context and explain
-vim.keymap.set("n", "<leader>cd", function()
-	local ctx = get_or_create_ctx()
-	-- clear and rebuild
-	vim.api.nvim_buf_set_lines(ctx, 0, -1, false, {})
+-- discover: gather project context, send to opus, save navigable output
 
-	local sys = cogcog_dir .. "/system.md"
-	if vim.fn.filereadable(sys) == 1 then
-		vim.api.nvim_buf_set_lines(ctx, 0, -1, false, vim.fn.readfile(sys))
-	end
+local function do_discover(discovery_file)
+	vim.fn.mkdir(cogcog_dir, "p")
 
-	-- gather project context automatically
-	local sections = {
-		{ "structure", "tree -L 3 --noreport -I 'node_modules|.git|__pycache__|target|dist|build|zig-cache' 2>/dev/null || find . -maxdepth 3 -not -path '*/.git/*' | head -60" },
-		{ "project file", "cat package.json 2>/dev/null || cat Cargo.toml 2>/dev/null || cat go.mod 2>/dev/null || cat pyproject.toml 2>/dev/null || cat Makefile 2>/dev/null || echo 'no project file found'" },
-		{ "entry points", "head -40 $(find . -maxdepth 2 \\( -name 'main.*' -o -name 'index.*' -o -name 'app.*' -o -name 'mod.*' \\) -not -path '*node_modules*' -not -path '*/.git/*' 2>/dev/null | head -3) 2>/dev/null || echo 'none found'" },
-		{ "recent git", "git log --oneline -15 2>/dev/null || echo 'not a git repo'" },
-		{ "README", "head -30 README.md 2>/dev/null || head -30 README 2>/dev/null || echo 'no readme'" },
+	local gather = {
+		{ "structure", "tree -L 3 --noreport -I 'node_modules|.git|__pycache__|target|dist|build|zig-cache|zig-out|vendor|.next' 2>/dev/null || find . -maxdepth 3 -not -path '*/.git/*' | head -80" },
+		{ "project", "cat package.json 2>/dev/null || cat Cargo.toml 2>/dev/null || cat go.mod 2>/dev/null || cat pyproject.toml 2>/dev/null || cat Makefile 2>/dev/null || echo 'none'" },
+		{ "entry points", "head -50 $(find . -maxdepth 2 \\( -name 'main.*' -o -name 'index.*' -o -name 'app.*' -o -name 'mod.*' -o -name 'lib.*' \\) -not -path '*node_modules*' -not -path '*/.git/*' 2>/dev/null | head -5) 2>/dev/null || echo 'none'" },
+		{ "git log", "git log --oneline -20 2>/dev/null || echo 'not a git repo'" },
+		{ "README", "head -60 README.md 2>/dev/null || head -60 README 2>/dev/null || echo 'none'" },
 	}
 
-	for _, sec in ipairs(sections) do
+	local input = {}
+	for _, sec in ipairs(gather) do
 		local output = vim.fn.systemlist(sec[2])
 		if #output > 0 then
-			vim.api.nvim_buf_set_lines(ctx, -1, -1, false,
-				{ "", "--- " .. sec[1] .. " ---", "" })
-			vim.api.nvim_buf_set_lines(ctx, -1, -1, false, output)
+			table.insert(input, "--- " .. sec[1] .. " ---")
+			table.insert(input, "")
+			vim.list_extend(input, output)
+			table.insert(input, "")
 		end
 	end
 
-	show_panel()
-	plan_send("I'm new to this project. Explain: what it does, how it's organized, key entry points, where to start reading. Be concise.")
+	table.insert(input, [[
+Analyze this project. Output a structured reference document organized by DOMAIN.
+
+Format rules:
+- Every file path must be real (from the tree above), written as `path/to/file.ext` for vim gf navigation
+- Group files by functional domain (auth, database, api, config, etc.) not by directory
+- Each domain section should be self-contained context: someone working on that domain can yank just that section
+
+# Project Name
+
+One-line description.
+
+## Architecture
+
+How the project is structured. 2-3 sentences. Reference key directories.
+
+## Reading Order
+
+Where to start, in sequence:
+
+1. `path/to/start` — why
+2. `path/to/next` — why
+
+## Domains
+
+### Domain Name (e.g. Auth, Database, API, Config)
+
+Purpose of this domain in 1 sentence.
+
+Files:
+- `path/to/file.ext` — what it does
+- `path/to/other.ext` — what it does
+
+Key concepts: brief notes on patterns, invariants, gotchas.
+
+(repeat for each domain)
+
+## Data Flow
+
+How input flows through the system, referencing files from above.
+
+## Dependencies
+
+Notable externals and what they're used for.
+
+IMPORTANT: Use ONLY real paths from the tree. Be concise. This is a reference, not an essay.
+Each domain section must work as standalone context for an LLM — if someone pastes just that section, it should have enough info to work on that domain.
+]])
+
+	-- create buffer for streaming output
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.bo[buf].filetype = "markdown"
+	vim.bo[buf].buftype = "nofile"
+
+	vim.cmd("tabnew")
+	vim.api.nvim_win_set_buf(0, buf)
+	vim.api.nvim_set_option_value("wrap", true, { win = 0 })
+	vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
+	vim.api.nvim_set_option_value("number", false, { win = 0 })
+	vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
+	vim.api.nvim_set_option_value("statusline", " cogcog discover │ analyzing...", { win = 0 })
+
+	-- set path so gf works relative to project root
+	vim.api.nvim_set_option_value("path", vim.fn.getcwd() .. "/**", { buf = buf })
+
+	local win = vim.api.nvim_get_current_win()
+
+	stream_to_buf(input, buf, {
+		cmd = checker_cmd, -- uses opus
+		on_done = function()
+			if not vim.api.nvim_buf_is_valid(buf) then return end
+			-- save to file
+			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+			vim.fn.writefile(lines, discovery_file)
+			-- now open the actual file so :w works naturally
+			vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
+			-- close the scratch buffer
+			if vim.api.nvim_buf_is_valid(buf) then
+				vim.api.nvim_buf_delete(buf, { force = true })
+			end
+			if vim.api.nvim_win_is_valid(win) then
+				vim.api.nvim_set_option_value("path", vim.fn.getcwd() .. "/**", { buf = 0 })
+				vim.api.nvim_set_option_value("statusline",
+					" cogcog discover │ done │ gf to navigate", { win = vim.api.nvim_get_current_win() })
+			end
+			vim.notify("cogcog: discovery saved to " .. discovery_file, vim.log.levels.INFO)
+		end,
+	})
+end
+
+-- <leader>cd: discover — gather project context, opus analyzes, save to .cogcog/discovery.md
+vim.keymap.set("n", "<leader>cd", function()
+	local discovery_file = cogcog_dir .. "/discovery.md"
+
+	-- if discovery exists, just open it
+	if vim.fn.filereadable(discovery_file) == 1 then
+		vim.ui.select({ "Open existing", "Re-discover" }, { prompt = "Discovery exists:" }, function(choice)
+			if not choice then return end
+			if choice == "Open existing" then
+				vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
+			else
+				do_discover(discovery_file)
+			end
+		end)
+		return
+	end
+	do_discover(discovery_file)
 end, { desc = "cogcog: discover project" })
 
 vim.keymap.set("n", "<leader>cc", function()

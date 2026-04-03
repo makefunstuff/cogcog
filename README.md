@@ -125,17 +125,26 @@ git diff --staged | cogcog --raw "review this"
 
 ## Day 1 on a new codebase
 
-`<leader>cd` — one keymap. Gathers project structure, entry points, package info, git history, README. Sends everything to the LLM and asks "explain this project."
+`<leader>cd` — one keymap. Gathers project tree, entry points, deps, git log, README. Sends to Opus for deep analysis. Saves a navigable reference to `.cogcog/discovery.md`.
 
 ```
-<leader>cd                          " auto-discover: tree + entry points + deps + git log → LLM
+<leader>cd                          " opus analyzes the project (one-time cost)
+```
+
+The output is a `gf`-navigable document — cursor on any file path, press `gf`, you're there:
+
+```markdown
+## Key Files
+- `src/auth/middleware.ts` — JWT validation, token refresh
+- `src/db/connection.ts` — database pool, migration runner
+```
+
+Run it once per project. Re-open anytime with `<leader>cd` again. Then explore interactively:
+
+```
 <C-g> → "show me the request lifecycle"
-<C-g> → "where's the auth logic?"
+gd → gaf → "explain this"
 ```
-
-From there, follow the LLM's pointers with `gd` (go to definition), pin what you find with `<leader>cy`, keep asking. The panel accumulates your exploration.
-
-The agent reads 50 files silently and gives you an answer. cogcog reads 5 files with you and gives you understanding.
 
 ## What you can do in 5 minutes
 
