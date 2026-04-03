@@ -1,19 +1,21 @@
 -- cogcog/stream.lua — shared streaming to buffer
+local config = require("cogcog.config")
 local M = {}
 
 M.active_jobs = {}
 
 local function strip_ansi(s) return s:gsub("\27%[[%d;]*m", "") end
 
--- stream command output into a buffer
+-- Stream command output into a buffer
 -- opts:
---   raw (bool)         — pass --raw flag
---   cmd (string)       — override command (default: cogcog binary)
---   on_done (fn)       — callback on success
+--   raw (bool)          — pass --raw flag
+--   cmd (string)        — override command (default: cogcog binary)
+--   on_done (fn)        — callback on success
+--   on_error (fn)       — callback on failure
 --   stderr_to_buf (bool) — show stderr in the buffer (for exec mode)
 function M.to_buf(lines, buf, opts)
   opts = opts or {}
-  local cogcog_bin = require("cogcog.config").cogcog_bin
+  local cogcog_bin = config.cogcog_bin
 
   local tmp = vim.fn.tempname()
   vim.fn.writefile(lines, tmp)
@@ -33,7 +35,7 @@ function M.to_buf(lines, buf, opts)
       if msg == "" or msg:match("^%s*$") then return end
 
       if opts.stderr_to_buf and vim.api.nvim_buf_is_valid(buf) then
-        -- show in buffer as indented lines
+        -- show in buffer as indented lines (exec mode)
         vim.schedule(function()
           if not vim.api.nvim_buf_is_valid(buf) then return end
           local lc = vim.api.nvim_buf_line_count(buf)
@@ -43,7 +45,7 @@ function M.to_buf(lines, buf, opts)
           M._scroll_buf(buf)
         end)
       else
-        -- classify: progress vs error
+        -- classify: progress messages vs real errors
         vim.schedule(function()
           local progress_patterns = {
             "^> build", "^⚙", "^✓", "^✗",
@@ -91,6 +93,7 @@ function M.to_buf(lines, buf, opts)
         if job then M.active_jobs[job] = nil end
         if code ~= 0 then
           vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
+          if opts.on_error then opts.on_error(code) end
         else
           vim.notify("cogcog: done", vim.log.levels.INFO)
           if opts.on_done then opts.on_done() end

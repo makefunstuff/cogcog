@@ -1,0 +1,23 @@
+# cogcog - ignore generated and temporary files
+
+# cogcog state
+.cogcog/
+  # session and system prompts
+  session.md
+  system.md
+  discovery.md
+
+# vim swap files
+*.swp
+*.swo
+*~
+
+# temp files
+tmp/
+temp/
+.tmp
+*.tmp
+
+# logs
+logs/
+*.log

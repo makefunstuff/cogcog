@@ -164,3 +164,43 @@ doc/cogcog.txt              # :help cogcog
 doc/cogcog-tutorial.txt     # :help cogcog-tutorial
 .cogcog/                    # project prompts and templates
 ```
+
+## Improvements (v2)
+
+### Error Handling
+- Added error callbacks to stream operations
+- Better validation before buffer operations
+- Notifications on failures instead of silent crashes
+
+### Race Condition Fixes
+- Selection captured INSIDE callbacks, not before
+- Prevents selection changes during async operations
+
+### Timeout Handling
+- Configurable timeout via `COGCOG_TIMEOUT` (default: 60s)
+- Automatic cleanup on timeout
+
+### Tests
+- Unit tests in `tests.lua`
+- Test context builders and stream logic
+
+### Documentation
+- `doc/CODE_STYLE.md` - coding conventions
+- `.gitignore` - ignore cogcog state files
+
+## Running Tests
+
+```bash
+lua tests.lua
+```
+
+## Improvements Summary
+
+| Issue | Fix |
+|-------|-----|
+| No error handling | Added error callbacks, validation |
+| Race conditions | Capture selection in callbacks |
+| No timeout | Configurable timeout mechanism |
+| No tests | Unit tests for core logic |
+| No docs | Added CODE_STYLE.md |
+| Silent failures | User notifications |

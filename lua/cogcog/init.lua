@@ -159,6 +159,10 @@ local function refactor_do(lines, source, instruction, l1, l2, target_buf)
     on_stdout = function(_, data)
       if not data then return end
       vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(target_buf) then
+          vim.notify("cogcog: target buffer closed", vim.log.levels.WARN)
+          return
+        end
         local result = ctx.strip_code_fences(data)
         if #result == 0 then
           vim.notify("cogcog: empty result", vim.log.levels.WARN)
@@ -169,13 +173,18 @@ local function refactor_do(lines, source, instruction, l1, l2, target_buf)
           vim.notify("cogcog: model refused, original preserved", vim.log.levels.WARN)
           return
         end
-        if vim.api.nvim_buf_is_valid(target_buf) then
-          vim.api.nvim_buf_set_lines(target_buf, l1 - 1, l2, false, result)
-          vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
+        vim.api.nvim_buf_set_lines(target_buf, l1 - 1, l2, false, result)
+        vim.notify("cogcog: refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
+      end)
+    end,
+    on_exit = function(_, code)
+      vim.schedule(function()
+        vim.fn.delete(tmp)
+        if code ~= 0 then
+          vim.notify("cogcog: exit " .. code, vim.log.levels.ERROR)
         end
       end)
     end,
-    on_exit = function() vim.schedule(function() vim.fn.delete(tmp) end) end,
   })
 end
 
