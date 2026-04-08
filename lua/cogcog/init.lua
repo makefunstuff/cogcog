@@ -351,10 +351,13 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
     table.insert(input, "UPDATE this discovery. Add new files, remove deleted ones, update descriptions.")
   else
-    table.insert(input, "Analyze this project based ONLY on the information above. Output a structured reference organized by DOMAIN.")
-    table.insert(input, "Format: `path/to/file.ext` for vim gf navigation. Group by domain. Be concise.")
+    table.insert(input, "Analyze this project based ONLY on the information above.")
+    table.insert(input, "Output a COMPREHENSIVE structured reference organized by domain/subsystem.")
+    table.insert(input, "List EVERY file visible in the tree with a short description of its purpose.")
+    table.insert(input, "Format each file as `path/to/file.ext` — description (for vim gf navigation).")
+    table.insert(input, "Group by domain. Use ### headings for each domain.")
   end
-  table.insert(input, "Output ONLY the discovery document. No tool calls, no file reading, no preamble.")
+  table.insert(input, "Output ONLY the discovery document in markdown. No tool calls, no file reading, no preamble, no commentary.")
 
   vim.fn.writefile({ "# Discovering project..." }, discovery_file)
   vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
