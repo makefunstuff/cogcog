@@ -527,23 +527,25 @@ end
 local function do_discover(discovery_file, update)
   vim.fn.mkdir(config.cogcog_dir, "p")
 
-  -- ── pre-compute stats in Lua ──────────────────────────────────
+  -- extension → treesitter language (bufload doesn't trigger filetype detection)
+  local ext_to_lang = {
+    lua = "lua", ts = "typescript", tsx = "tsx", js = "javascript", jsx = "javascript",
+    py = "python", go = "go", rs = "rust", zig = "zig", rb = "ruby",
+    java = "java", c = "c", cpp = "cpp", h = "c",
+  }
+
+  -- ── pre-compute stats ─────────────────────────────────────────
   local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ":t")
   local git_branch = vim.fn.systemlist("git branch --show-current 2>/dev/null")[1] or ""
-  local git_remote = vim.fn.systemlist("git remote get-url origin 2>/dev/null")[1] or ""
   local git_commit_count = vim.fn.systemlist("git rev-list --count HEAD 2>/dev/null")[1] or "?"
   local git_last_commit = vim.fn.systemlist("git log -1 --format='%h %s (%cr)' 2>/dev/null")[1] or ""
   local git_contributors = vim.fn.systemlist("git shortlog -sn --no-merges HEAD 2>/dev/null | wc -l")[1] or "?"
+  local total_files = vim.trim(vim.fn.systemlist([[find . -maxdepth 4 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/target/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/__pycache__/*' 2>/dev/null | wc -l]])[1] or "?")
+  local loc_raw = vim.fn.systemlist([[find . -maxdepth 4 -type f \( -name '*.lua' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.zig' -o -name '*.rb' -o -name '*.java' -o -name '*.c' -o -name '*.cpp' -o -name '*.h' \) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1]])[1] or ""
+  local total_loc = loc_raw:match("^%s*(%d+)") or "?"
 
-  -- file stats by extension
-  local file_counts = vim.fn.systemlist([[find . -maxdepth 4 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/target/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/__pycache__/*' 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -15]])
-  local total_files = vim.fn.systemlist([[find . -maxdepth 4 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/target/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/__pycache__/*' 2>/dev/null | wc -l]])[1] or "?"
+  local file_counts_raw = vim.fn.systemlist([[find . -maxdepth 4 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/target/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/__pycache__/*' 2>/dev/null | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10]])
 
-  -- LOC for source files
-  local loc = vim.fn.systemlist([[find . -maxdepth 4 -type f \( -name '*.lua' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.zig' -o -name '*.rb' -o -name '*.java' -o -name '*.c' -o -name '*.cpp' -o -name '*.h' \) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/vendor/*' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1]])[1] or ""
-  local total_loc = loc:match("^%s*(%d+)") or "?"
-
-  -- manifest
   local manifest_name = vim.fn.glob("package.json") ~= "" and "package.json"
     or vim.fn.glob("Cargo.toml") ~= "" and "Cargo.toml"
     or vim.fn.glob("go.mod") ~= "" and "go.mod"
@@ -551,47 +553,38 @@ local function do_discover(discovery_file, update)
     or nil
   local manifest_content = manifest_name and vim.fn.readfile(manifest_name, "", 30) or {}
 
-  -- ── build the pre-computed header ─────────────────────────────
-  local header = {
-    "# 📋 " .. project_name,
-    "",
-  }
-
-  -- stats table
-  table.insert(header, "| | |")
-  table.insert(header, "|---|---|")
-  if git_branch ~= "" then table.insert(header, "| 🔀 Branch | `" .. git_branch .. "` |") end
-  table.insert(header, "| 📁 Files | " .. vim.trim(total_files) .. " |")
-  table.insert(header, "| 📏 Source LOC | " .. total_loc .. " |")
-  if git_commit_count ~= "?" then table.insert(header, "| 📝 Commits | " .. vim.trim(git_commit_count) .. " |") end
-  if vim.trim(git_contributors) ~= "" then table.insert(header, "| 👥 Contributors | " .. vim.trim(git_contributors) .. " |") end
-  if git_last_commit ~= "" then table.insert(header, "| 🕐 Last commit | " .. git_last_commit .. " |") end
-
-  -- diagnostics
   local diags = vim.diagnostic.get()
-  if #diags > 0 then
-    local counts = { 0, 0, 0, 0 }
-    for _, d in ipairs(diags) do counts[d.severity] = (counts[d.severity] or 0) + 1 end
-    table.insert(header, "| 🩺 Health | " .. "❌" .. counts[1] .. " ⚠️" .. counts[2] .. " ℹ️" .. counts[3] .. " 💡" .. counts[4] .. " |")
+  local diag_counts = { 0, 0, 0, 0 }
+  for _, d in ipairs(diags) do diag_counts[d.severity] = (diag_counts[d.severity] or 0) + 1 end
+
+  -- ── stats block (rendered in Lua, model keeps verbatim) ───────
+  local header = { "# 📋 " .. project_name, "" }
+  table.insert(header, "```")
+  if git_branch ~= "" then table.insert(header, "🔀 " .. git_branch) end
+  table.insert(header, "📁 " .. total_files .. " files   📏 " .. total_loc .. " LOC")
+  local git_line = {}
+  if git_commit_count ~= "?" then table.insert(git_line, "📝 " .. vim.trim(git_commit_count) .. " commits") end
+  if vim.trim(git_contributors or "") ~= "" and vim.trim(git_contributors) ~= "0" then
+    table.insert(git_line, "👥 " .. vim.trim(git_contributors))
   end
+  if #git_line > 0 then table.insert(header, table.concat(git_line, "   ")) end
+  if git_last_commit ~= "" then table.insert(header, "🕐 " .. git_last_commit) end
+  if #diags > 0 then
+    table.insert(header, "🩺 ❌" .. diag_counts[1] .. " ⚠️" .. diag_counts[2] .. " ℹ️" .. diag_counts[3] .. " 💡" .. diag_counts[4])
+  end
+  -- file type breakdown
+  local types = {}
+  for _, line in ipairs(file_counts_raw) do
+    local count, ext = line:match("^%s*(%d+)%s+(%S+)")
+    if count and ext then table.insert(types, ext .. ":" .. count) end
+  end
+  if #types > 0 then table.insert(header, "📊 " .. table.concat(types, "  ")) end
+  table.insert(header, "```")
   table.insert(header, "")
 
-  -- file breakdown
-  if #file_counts > 0 then
-    table.insert(header, "<details><summary>📊 File types</summary>")
-    table.insert(header, "")
-    table.insert(header, "```")
-    for _, line in ipairs(file_counts) do table.insert(header, line) end
-    table.insert(header, "```")
-    table.insert(header, "</details>")
-    table.insert(header, "")
-  end
-
-  -- ── gather raw data for the model ─────────────────────────────
+  -- ── raw data for model ────────────────────────────────────────
   local input = {}
   vim.list_extend(input, header)
-  table.insert(input, "<!-- model: fill in the sections below based on the raw data -->")
-  table.insert(input, "")
 
   -- tree
   local tree = vim.fn.systemlist("tree -L 3 --noreport --dirsfirst -I 'node_modules|.git|__pycache__|target|dist|build|zig-cache|zig-out|vendor|.next' 2>/dev/null || find . -maxdepth 3 -not -path '*/.git/*' | head -80")
@@ -601,14 +594,12 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
   end
 
-  -- manifest
   if #manifest_content > 0 then
     table.insert(input, "--- raw: " .. manifest_name .. " ---")
     vim.list_extend(input, manifest_content)
     table.insert(input, "")
   end
 
-  -- entry points
   local entries = vim.fn.systemlist([[head -50 $(find . -maxdepth 2 -type f \( -name 'main.*' -o -name 'index.*' -o -name 'app.*' \) -not -path '*node_modules*' -not -path '*/.git/*' 2>/dev/null | head -5) 2>/dev/null]])
   if #entries > 0 then
     table.insert(input, "--- raw: entry points ---")
@@ -616,7 +607,6 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
   end
 
-  -- recent git
   local gitlog = vim.fn.systemlist("git log --oneline -20 2>/dev/null")
   if #gitlog > 0 then
     table.insert(input, "--- raw: git log ---")
@@ -624,7 +614,6 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
   end
 
-  -- README
   local readme = vim.fn.systemlist("head -60 README.md 2>/dev/null || head -60 README 2>/dev/null")
   if #readme > 0 then
     table.insert(input, "--- raw: README ---")
@@ -632,51 +621,53 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
   end
 
-  -- treesitter top-level declarations
+  -- ── treesitter declarations ───────────────────────────────────
   local ts_lines = {}
-  local key_files = vim.fn.systemlist("find . -maxdepth 3 -type f \\( -name '*.lua' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.zig' \\) -not -path '*node_modules*' -not -path '*/.git/*' -not -path '*/vendor/*' 2>/dev/null | head -30")
-  for _, file in ipairs(key_files) do
-    local bufnr = vim.fn.bufadd(file)
-    vim.fn.bufload(bufnr)
-    local lang = vim.treesitter.language.get_lang(vim.bo[bufnr].filetype)
-    if lang and pcall(vim.treesitter.get_parser, bufnr, lang) then
+  local ts_file_count = 0
+  local src_files = vim.fn.systemlist("find . -maxdepth 3 -type f \\( -name '*.lua' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.zig' \\) -not -path '*node_modules*' -not -path '*/.git/*' -not -path '*/vendor/*' -not -path '*/dist/*' -not -path '*/build/*' 2>/dev/null | head -40")
+  for _, file in ipairs(src_files) do
+    local ext = file:match("%.(%w+)$")
+    local lang = ext and ext_to_lang[ext]
+    if lang and pcall(vim.treesitter.language.inspect, lang) then
+      local bufnr = vim.fn.bufadd(file)
+      vim.fn.bufload(bufnr)
       local ok, parser = pcall(vim.treesitter.get_parser, bufnr, lang)
-      if ok then
-        local tree_result = parser:parse()[1]
-        if tree_result then
-          local root = tree_result:root()
-          local file_decls = {}
+      if ok and parser then
+        local trees = parser:parse()
+        if trees and trees[1] then
+          local root = trees[1]:root()
+          local decls = {}
           for child in root:iter_children() do
             local ntype = child:type()
             if ntype:match("function") or ntype:match("class") or ntype:match("struct")
-              or ntype:match("impl") or ntype:match("interface") or ntype:match("type")
-              or ntype:match("method") or ntype:match("enum") or ntype:match("const")
-              or ntype:match("export") or ntype:match("pub") then
-              local start_row = child:start()
-              local first_line = vim.api.nvim_buf_get_lines(bufnr, start_row, start_row + 1, false)[1] or ""
-              first_line = first_line:gsub("{%s*$", ""):gsub("%s+$", "")
-              if #first_line > 120 then first_line = first_line:sub(1, 117) .. "..." end
-              if first_line ~= "" then
-                table.insert(file_decls, "  :" .. (start_row + 1) .. " " .. first_line)
-              end
+              or ntype:match("impl") or ntype:match("interface") or ntype:match("type_alias")
+              or ntype:match("method") or ntype:match("enum")
+              or ntype:match("export") or ntype:match("variable_declaration")
+              or ntype:match("lexical_declaration") then
+              local row = child:start()
+              local line = (vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""):gsub("{%s*$", ""):gsub("%s+$", "")
+              if #line > 100 then line = line:sub(1, 97) .. "..." end
+              if line ~= "" then table.insert(decls, "  :" .. (row + 1) .. "  " .. line) end
             end
           end
-          if #file_decls > 0 then
+          if #decls > 0 then
+            ts_file_count = ts_file_count + 1
             table.insert(ts_lines, file .. ":")
-            vim.list_extend(ts_lines, file_decls)
+            vim.list_extend(ts_lines, decls)
           end
         end
       end
     end
   end
   if #ts_lines > 0 then
-    table.insert(input, "--- raw: treesitter declarations ---")
+    table.insert(input, "--- raw: treesitter (" .. ts_file_count .. " files parsed) ---")
     vim.list_extend(input, ts_lines)
     table.insert(input, "")
   end
 
-  -- LSP symbols from loaded buffers
+  -- ── LSP symbols (only from already-open buffers with LSP) ─────
   local lsp_lines = {}
+  local lsp_buf_count = 0
   if #vim.lsp.get_clients() > 0 then
     local seen = {}
     for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -687,20 +678,21 @@ local function do_discover(discovery_file, update)
           local params = { textDocument = vim.lsp.util.make_text_document_params(b) }
           local results = vim.lsp.buf_request_sync(b, "textDocument/documentSymbol", params, 2000)
           if results then
-            local buf_syms = {}
-            local function collect(symbols, indent)
+            local syms = {}
+            local function collect_s(symbols, indent)
               for _, s in ipairs(symbols) do
                 local kind = vim.lsp.protocol.SymbolKind[s.kind] or "?"
-                table.insert(buf_syms, string.rep("  ", indent + 1) .. kind .. " " .. s.name)
-                if s.children and indent < 1 then collect(s.children, indent + 1) end
+                table.insert(syms, string.rep("  ", indent + 1) .. kind .. " " .. s.name)
+                if s.children and indent < 1 then collect_s(s.children, indent + 1) end
               end
             end
             for _, r in pairs(results) do
-              if r.result and #r.result > 0 then collect(r.result, 0) end
+              if r.result and #r.result > 0 then collect_s(r.result, 0) end
             end
-            if #buf_syms > 0 then
+            if #syms > 0 then
+              lsp_buf_count = lsp_buf_count + 1
               table.insert(lsp_lines, bname .. ":")
-              vim.list_extend(lsp_lines, buf_syms)
+              vim.list_extend(lsp_lines, syms)
             end
           end
         end
@@ -708,32 +700,31 @@ local function do_discover(discovery_file, update)
     end
   end
   if #lsp_lines > 0 then
-    table.insert(input, "--- raw: LSP symbols ---")
+    table.insert(input, "--- raw: LSP symbols (" .. lsp_buf_count .. " buffers) ---")
     vim.list_extend(input, lsp_lines)
     table.insert(input, "")
   end
 
-  -- knowledge base (LLM-powered search)
+  -- ── knowledge base (LLM search) ──────────────────────────────
   local kb = config.kb_path()
   local kb_results
   if kb then
-    local search_terms = { project_name }
+    local terms = { project_name }
     if manifest_name then
       for _, line in ipairs(manifest_content) do
-        local name = line:match('"name"%s*:%s*"(.-)"') or line:match('^name%s*=%s*"(.-)"') or line:match('^module%s+(%S+)')
-        if name then table.insert(search_terms, name:gsub(".*/", "")); break end
+        local n = line:match('"name"%s*:%s*"(.-)"') or line:match('^name%s*=%s*"(.-)"') or line:match('^module%s+(%S+)')
+        if n then table.insert(terms, n:gsub(".*/", "")); break end
       end
     end
-    -- also add key tech terms from the project
-    for _, line in ipairs(readme) do
-      for word in line:gmatch("%w+") do
-        if #word > 4 then table.insert(search_terms, word) end
+    for _, line in ipairs(readme or {}) do
+      for w in line:gmatch("%w+") do
+        if #w > 4 then table.insert(terms, w) end
       end
-      if #search_terms > 15 then break end
+      if #terms > 15 then break end
     end
-    kb_results = ctx.kb_search(table.concat(search_terms, " "), 6)
+    kb_results = ctx.kb_search(table.concat(terms, " "), 6)
     if kb_results and #kb_results > 0 then
-      table.insert(input, "--- raw: knowledge base ---")
+      table.insert(input, "--- raw: knowledge base (" .. #kb_results .. " pages) ---")
       for _, r in ipairs(kb_results) do
         table.insert(input, "📚 " .. r.title .. " (" .. r.path .. ")")
         table.insert(input, r.snippet)
@@ -742,68 +733,66 @@ local function do_discover(discovery_file, update)
     end
   end
 
+  -- ── sources summary ───────────────────────────────────────────
+  local sources = { "tree", "git" }
+  if #manifest_content > 0 then table.insert(sources, manifest_name) end
+  if #ts_lines > 0 then table.insert(sources, "treesitter(" .. ts_file_count .. ")") end
+  if #lsp_lines > 0 then table.insert(sources, "lsp(" .. lsp_buf_count .. ")") end
+  if kb_results and #kb_results > 0 then table.insert(sources, "kb(" .. #kb_results .. ")") end
+  if #diags > 0 then table.insert(sources, "diagnostics") end
+
   -- ── prompt ────────────────────────────────────────────────────
   if update and vim.fn.filereadable(discovery_file) == 1 then
     table.insert(input, "--- previous discovery ---")
     vim.list_extend(input, vim.fn.readfile(discovery_file))
     table.insert(input, "")
-    table.insert(input, "UPDATE this discovery dashboard. Keep the stats table at the top exactly as-is.")
-    table.insert(input, "Update the sections below it based on new raw data. Preserve the format.")
+    table.insert(input, "UPDATE this dashboard. Keep the ``` stats block verbatim. Update sections below.")
   else
     table.insert(input, "")
-    table.insert(input, "The stats table above is pre-computed — keep it exactly as-is at the top.")
-    table.insert(input, "Below it, write these sections using the raw data:")
+    table.insert(input, "The ``` stats block above is pre-computed. Keep it EXACTLY as-is at the top.")
+    table.insert(input, "Below it, write these sections. Use ONLY data from the raw sections above.")
     table.insert(input, "")
     table.insert(input, "## 🏗 Architecture")
-    table.insert(input, "2-3 sentences. How the project is structured. Data flow.")
-    table.insert(input, "Name the real abstractions/patterns. Use an ASCII diagram if it helps:")
-    table.insert(input, "```")
-    table.insert(input, "component → component → component")
-    table.insert(input, "```")
+    table.insert(input, "2-3 sentences. Then an ASCII flow diagram in a ``` block.")
     table.insert(input, "")
     table.insert(input, "## 📦 Modules")
-    table.insert(input, "One ### per subsystem. Under each, a TABLE:")
-    table.insert(input, "| File | LOC | Role |")
-    table.insert(input, "|------|-----|------|")
-    table.insert(input, "| `path` | ~N | what it does |")
-    table.insert(input, "Then: key functions/types from treesitter data (if available).")
-    table.insert(input, "Keep it dense — tables, not paragraphs.")
+    table.insert(input, "### SubsystemName")
+    table.insert(input, "| File | Role |")
+    table.insert(input, "|------|------|")
+    table.insert(input, "| `path/file` | what it does |")
+    table.insert(input, "Key declarations (from treesitter if available):")
+    table.insert(input, "- `FunctionOrType` — purpose")
+    table.insert(input, "(repeat ### for each subsystem)")
     table.insert(input, "")
     table.insert(input, "## 🚀 Entry Points")
-    table.insert(input, "Numbered list. Where execution starts, what calls what.")
-    table.insert(input, "1. `path:line` — what happens here")
+    table.insert(input, "1. `path:line` — what starts here")
     table.insert(input, "")
     table.insert(input, "## 🔗 Stack")
-    table.insert(input, "Table of key deps and what they do:")
     table.insert(input, "| Dep | Purpose |")
     table.insert(input, "|-----|---------|")
-    table.insert(input, "Then: notable patterns (error handling, config, testing).")
     table.insert(input, "")
-    if #diags > 0 then
-      table.insert(input, "## 🩺 Issues")
-      table.insert(input, "Top diagnostic issues. Group by type. Be specific:")
-      table.insert(input, "- `path:line` — the actual problem")
-      table.insert(input, "")
-    end
     if kb_results and #kb_results > 0 then
       table.insert(input, "## 📚 Team Knowledge")
-      table.insert(input, "Summarize what the knowledge base says about this project or its domain.")
-      table.insert(input, "Link to KB pages. Include: decisions, gotchas, deployment notes, history.")
+      table.insert(input, "From the KB pages above, extract:")
+      table.insert(input, "- **PageTitle** — key decision, gotcha, or context")
+      table.insert(input, "(one bullet per relevant KB page)")
       table.insert(input, "")
     end
     table.insert(input, "## 🗺 Start Here")
-    table.insert(input, "Numbered reading order (5-10 files). Each with WHY:")
-    table.insert(input, "1. `path` — what you learn from this file")
+    table.insert(input, "1. `path` — what you learn")
+    table.insert(input, "")
+    table.insert(input, "---")
+    table.insert(input, "*Sources: " .. table.concat(sources, ", ") .. "*")
     table.insert(input, "")
     table.insert(input, "RULES:")
-    table.insert(input, "- Keep the pre-computed stats table at the top EXACTLY as-is")
-    table.insert(input, "- All paths must be gf-navigable (real relative paths)")
-    table.insert(input, "- Use tables, not paragraphs. Dense, not fluffy.")
-    table.insert(input, "- Name real functions, real types, real patterns from the data")
-    table.insert(input, "- This is a working dashboard, not documentation")
+    table.insert(input, "- Keep ``` stats block VERBATIM at top")
+    table.insert(input, "- Use TABLES for Modules and Stack — never prose paragraphs")
+    table.insert(input, "- All paths: real relative paths from tree, gf-navigable in vim")
+    table.insert(input, "- Include treesitter declarations when available — name real functions/types")
+    table.insert(input, "- No HTML. No <details>. Plain markdown only.")
+    table.insert(input, "- This is a dense working dashboard, not documentation")
   end
-  table.insert(input, "Output ONLY the discovery document in markdown. No tool calls, no file reading, no preamble, no commentary after the document.")
-
+  table.insert(input, "Output ONLY the dashboard. No preamble, no commentary, no tool calls.")
   vim.fn.writefile({ "# Discovering project..." }, discovery_file)
   vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
   local buf = vim.api.nvim_get_current_buf()
