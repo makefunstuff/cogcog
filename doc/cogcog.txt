@@ -67,6 +67,8 @@ PLANNING                                        *cogcog-plan*
                 Opens workbench automatically. Cancellable with <C-c>.
 <leader>ct      Pick and run a project tool from `.cogcog/tools/`.
                 Output streams to the workbench. Tools are plain scripts.
+<leader>cT      Generate a new tool. Describe what you need, review the
+                generated script, press `a` to save to `.cogcog/tools/`.
 
 VIM STATE AS CONTEXT                            *cogcog-context*
 

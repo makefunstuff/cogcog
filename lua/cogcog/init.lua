@@ -633,6 +633,68 @@ vim.keymap.set("n", "<leader>ct", function()
   end)
 end, { desc = "cogcog: run tool → workbench" })
 
+vim.keymap.set("n", "<leader>cT", function()
+  vim.ui.input({ prompt = "tool idea: " }, function(desc)
+    if not desc or desc == "" then return end
+    local input = {}
+    ctx.with_system(input)
+    ctx.with_workbench(input)
+    table.insert(input, "Generate a small project-local tool script (bash) for this job:")
+    table.insert(input, desc)
+    table.insert(input, "")
+    table.insert(input, "Rules:")
+    table.insert(input, "- Output ONLY the script content, no explanation before or after")
+    table.insert(input, "- Start with #!/bin/bash and set -euo pipefail")
+    table.insert(input, "- Keep it short and single-purpose")
+    table.insert(input, "- Print human-readable output to stdout")
+    table.insert(input, "- Use relative paths (assume CWD is the project root)")
+
+    local review_buf = ctx.reuse_or_split("[cogcog-tool-review]", " 🔧 tool review │ a save │ q close")
+    stream.to_buf(input, review_buf, {
+      raw = true,
+      on_done = function()
+        if not vim.api.nvim_buf_is_valid(review_buf) then return end
+        local all = vim.api.nvim_buf_get_lines(review_buf, 0, -1, false)
+        -- extract script lines (strip fences if model wrapped in ```)
+        local script = {}
+        local in_fence = false
+        for _, line in ipairs(all) do
+          if line:match("^```") then
+            in_fence = not in_fence
+          elseif in_fence or line ~= "" or #script > 0 then
+            table.insert(script, line)
+          end
+        end
+        -- trim trailing empty lines
+        while #script > 0 and script[#script] == "" do table.remove(script) end
+        if #script == 0 then return end
+
+        -- rewrite buffer with clean script + instructions
+        local display = { "# Tool review", "", "Description: " .. desc, "", "Press `a` to save to .cogcog/tools/, `q` to discard.", "", "---", "" }
+        vim.list_extend(display, script)
+        vim.bo[review_buf].modifiable = true
+        vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, display)
+
+        vim.keymap.set("n", "a", function()
+          -- prompt for filename
+          vim.ui.input({ prompt = "tool name: ", default = desc:gsub("%s+", "-"):gsub("[^%w%-_]", ""):sub(1, 40) .. ".sh" }, function(name)
+            if not name or name == "" then return end
+            local tools_dir = config.cogcog_dir .. "/tools"
+            vim.fn.mkdir(tools_dir, "p")
+            local path = tools_dir .. "/" .. name
+            vim.fn.writefile(script, path)
+            vim.fn.setfperm(path, "rwxr-xr-x")
+            vim.notify("🔧 saved → .cogcog/tools/" .. name)
+            for _, win in ipairs(vim.fn.win_findbuf(review_buf)) do
+              if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, false) end
+            end
+          end)
+        end, { buffer = review_buf, desc = "cogcog: save tool" })
+      end,
+    })
+  end)
+end, { desc = "cogcog: generate tool" })
+
 vim.keymap.set("n", "<leader>co", function()
   if ctx.workbench_win() then vim.api.nvim_win_close(ctx.workbench_win(), false) else ctx.show_workbench() end
 end, { desc = "cogcog: workbench" })

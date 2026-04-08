@@ -115,7 +115,13 @@ chmod +x .cogcog/tools/test-changed.sh
 <C-g> → "what failed?"             ask about the output
 ```
 
-Tools are plain scripts. Generate them with `<C-g>`, review, save to `.cogcog/tools/`.
+Tools are plain scripts. Generate new ones with `<leader>cT` — describe what you need, review, save.
+
+The self-evolution loop:
+```
+encounter friction → <leader>cT "tool that checks X" → review → save
+next time           → <leader>ct → pick it → output in workbench → act on it
+```
 
 ## The loop
 
@@ -202,6 +208,7 @@ Requires: `bash`, `curl`, `jq`.
 | `<leader>cc` | n | clear workbench |
 | `<leader>g!` | n | exec command → workbench |
 | `<leader>ct` | n | run project tool → workbench |
+| `<leader>cT` | n | generate new tool → review → save |
 | `<leader>gj` | n | jump trail |
 | `<leader>g.` | n | review recent changes |
 | `<leader>gq` | n | summarize quickfix |
