@@ -11,9 +11,8 @@ LLM as a vim verb.
   your context      motion or visual       q to close, u to undo, a to apply
 ```
 
-There is no chat. No hidden context. No session history.
-Each verb is a stateless call on the text you pointed it at.
-Your visible windows are the context. Quickfix is the batch boundary.
+Fast verbs are stateless. No chat, no hidden context, no session history.
+The workbench is where longer work happens — with tools the model can use.
 
 ## The workflow
 
@@ -57,35 +56,68 @@ Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a`
 
 ### 5. Plan (workbench + tools)
 
-```
-<leader>co                          open workbench
-<C-g> → "design the auth flow"     synthesize
-```
-
-The model can request tools during workbench synthesis:
+The workbench is where stateless verbs end and iterative work begins.
 
 ```
-model: I need to see the current implementation
-  🔧 read_file("src/auth.ts") — y/n?
-y
+<C-g> → "refactor auth to use token buckets"
+```
+
+The model responds — and can request tools to gather context:
+
+```
+I need to see the current auth implementation.
+
+🔧 read_file("src/middleware/auth.ts")
+
   --- tool: read_file ---
-  [file contents]
+  import { verify } from './jwt';
+  export function authMiddleware(req, res, next) { ... }
   --- end ---
-model: Here's the refactored version...
+
+I also need the rate limiter.
+
+🔧 grep("RateLimiter", "src/")
+
+  --- tool: grep ---
+  src/limiter.ts:3:export class RateLimiter {
+  src/middleware/rate-limit.ts:1:import { RateLimiter } from './limiter';
+  --- end ---
+
+Here's the refactored version using token buckets:
+  [code in workbench]
 ```
 
 Every tool call is visible in the workbench. You approve each one.
-Set `vim.g.cogcog_tool_mode` to control approval:
+The model gets up to 5 tool turns per question, then stops.
+
+**Available tools:**
+
+| Tool | What | Read-only |
+|------|------|-----------|
+| `read_file(path)` | read a project file | yes |
+| `list_files(dir)` | list directory contents | yes |
+| `grep(pattern, path)` | search for patterns | yes |
+| `run_command(cmd)` | execute a shell command | no |
+| `.cogcog/tools/*` | your project scripts | no |
+
+**Approval modes** (`vim.g.cogcog_tool_mode`):
 
 | Mode | Behavior |
 |------|----------|
 | `"ask"` (default) | approve every tool call |
-| `"read"` | auto-approve read-only tools, ask for commands |
+| `"read"` | auto-approve read-only, ask for commands |
 | `"trust"` | auto-approve all for this turn |
 
-The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run commands with `<leader>g!`, run project tools with `<leader>ct`, edit freely with normal vim.
+### 6. Execute and import
 
-### 6. Batch (quickfix)
+```
+<leader>g! → "make test"           run command → output in workbench
+<leader>gy                          pin selection to workbench
+<leader>ct                          pick a project tool → output in workbench
+<C-g> → "what failed?"             ask about the output
+```
+
+### 7. Batch (quickfix)
 
 ```vim
 :grep "TODO" src/**                 build target set
@@ -95,7 +127,7 @@ The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run comman
 
 Quickfix is the hard boundary. Cogcog never roams beyond it.
 
-### 7. Discover (unfamiliar code)
+### 8. Discover (unfamiliar code)
 
 ```
 <leader>cd                          scout the project
@@ -107,61 +139,58 @@ Produces a two-part discovery note:
 
 Then: `gf` into a file → `gaip` to understand → `<leader>gy` to pin → `<C-g>` to synthesize.
 
-### 8. Investigate
-
-```
-gd → gd → gd                       navigate normally
-<leader>gj                          how do these locations connect?
-<leader>g.                          any bugs in my changes?
-```
-
 ### 9. Project tools (`.cogcog/tools/`)
 
-Scripts in `.cogcog/tools/` are project-local tools cogcog knows about.
+Scripts in `.cogcog/tools/` are project-local tools. The model can use them
+during workbench synthesis, and you can run them directly.
 
 ```bash
-# create a tool
 mkdir -p .cogcog/tools
 cat > .cogcog/tools/test-changed.sh << 'EOF'
 #!/bin/bash
+# Run tests for files changed since last commit
 git diff --name-only HEAD | grep -E '\.ts$' | xargs npx jest --findRelatedTests
 EOF
 chmod +x .cogcog/tools/test-changed.sh
 ```
 
-```
-<leader>ct                          pick a tool, run it, output → workbench
-<C-g> → "what failed?"             ask about the output
-```
+Generate new tools with the LLM:
 
-Tools are plain scripts. Generate new ones with `<leader>cT` — describe what you need, review, save.
+```
+<leader>cT → "tool that finds unused exports"
+  → model generates script → review buffer → a to save → .cogcog/tools/
+```
 
 The self-evolution loop:
-```
-encounter friction → <leader>cT "tool that checks X" → review → save
-next time           → <leader>ct → pick it → output in workbench → act on it
-```
-
-## The loop
-
-Most real work follows one of these paths:
 
 ```
-understand          gaip → read → gaip → read
-                    ↓
-generate            gsaf → :w → :make → fix
-                    ↓
-refactor            <leader>graf → review → iterate
-                    ↓
-verify              <leader>gcaf → done or back to refactor
+encounter friction ──→ <leader>cT "tool that checks X" ──→ review ──→ save
+       ↑                                                                 │
+       └──── next time: <leader>ct or model uses it via <C-g> ──────────┘
+```
+
+## The loops
+
+```
+stateless           gaip → read → gaip → read          (0.3s per call)
+                    gsaf → :w → :make → fix
+                    <leader>graf → review → iterate
+                    <leader>gcaf → done
 ```
 
 ```
-orient              <leader>cd → gf → gaip → <leader>gy
-                    ↓
-plan                <leader>co → <C-g> → <C-g>
-                    ↓
+workbench           <C-g> "question"                    (model uses tools)
+                      → 🔧 read_file → y               (you approve)
+                      → 🔧 grep → y                    (you approve)
+                      → model responds with full context
+                    <C-g> "now implement it"             (continues)
+                      → model uses tools again if needed
+```
+
+```
+orient + plan       <leader>cd → gf → gaip → <leader>gy → <C-g>
 batch               :grep → <leader>gR → :make
+evolve              <leader>cT → tool saved → <leader>ct or <C-g> reuses it
 ```
 
 ## Context model
@@ -169,13 +198,13 @@ batch               :grep → <leader>gR → :make
 | Tier | What | You control it by |
 |------|------|-------------------|
 | **Hard scope** | the text you act on | motion, selection, buffer |
-| **Explicit imports** | text you brought in | workbench, `<leader>gy`, `:read` |
+| **Explicit imports** | text you brought in | workbench, `<leader>gy`, `<leader>g!` |
 | **Soft context** | nearby signals | visible windows |
+| **Tool results** | data the model fetched | tool calls you approved in workbench |
 
-Your screen is your context. Split two files side by side → `gaip` sees both.
-Close one → it sees one. No `@file` mentions needed.
-
-Quickfix is the batch scope. When populated, it's included automatically.
+Your screen is your context for fast verbs.
+The workbench accumulates context for longer work — including tool results.
+Quickfix is the batch scope.
 
 ## Install
 
@@ -221,7 +250,7 @@ Requires: `bash`, `curl`, `jq`.
 | `<leader>gr` | v | refactor selection |
 | `<leader>gc{motion}` | n | check |
 | `<leader>gc` | v | check selection |
-| `<C-g>` | n | synthesize in workbench |
+| `<C-g>` | n | synthesize in workbench (with tools) |
 | `<leader>gy` | v | pin to workbench |
 | `<leader>co` | n | toggle workbench |
 | `<leader>cc` | n | clear workbench |
@@ -267,5 +296,5 @@ lua/cogcog/stream.lua    streaming to buffers
 lua/cogcog/context.lua   scope builders, workbench, helpers
 lua/cogcog/config.lua    paths and config
 doc/cogcog.txt           :help cogcog
-.cogcog/                 per-project prompts and state
+.cogcog/                 per-project prompts, tools, and state
 ```
