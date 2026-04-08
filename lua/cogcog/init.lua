@@ -705,10 +705,11 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
   end
 
-  -- ── knowledge base (LLM search) ──────────────────────────────
+  -- ── knowledge base (Obsidian CLI → grep fallback, no LLM) ────
   local kb = config.kb_path()
-  local kb_results
-  if kb then
+  local kb_pages = {}
+  if kb and vim.fn.isdirectory(kb .. "/wiki") == 1 then
+    -- build search terms from project context
     local terms = { project_name }
     if manifest_name then
       for _, line in ipairs(manifest_content) do
@@ -726,14 +727,82 @@ local function do_discover(discovery_file, update)
       end
       if #terms > 15 then break end
     end
-    kb_results = ctx.kb_search(table.concat(terms, " "), 6)
-    if kb_results and #kb_results > 0 then
-      table.insert(input, "--- raw: knowledge base (" .. #kb_results .. " pages) ---")
-      for _, r in ipairs(kb_results) do
-        table.insert(input, "📚 " .. (r.title or "") .. " (" .. (r.path or "") .. ")")
-        if r.snippet and r.snippet ~= "" then table.insert(input, r.snippet) end
+    local query = table.concat(terms, " ")
+
+    -- try Obsidian CLI first (requires running Obsidian app)
+    local vault_name = vim.fn.fnamemodify(kb, ":t")
+    local obs_raw = ""
+    if vim.fn.executable("obsidian") == 1 then
+      obs_raw = vim.fn.system("obsidian search query=" .. vim.fn.shellescape(query)
+        .. " vault=" .. vim.fn.shellescape(vault_name)
+        .. " path=wiki limit=8 format=json 2>/dev/null")
+    end
+    local obs_paths = {}
+    if obs_raw ~= "" then
+      local ok, parsed = pcall(vim.json.decode, obs_raw)
+      if ok and type(parsed) == "table" then
+        for _, hit in ipairs(parsed) do
+          local p = type(hit) == "table" and (hit.path or hit.file) or hit
+          if type(p) == "string" then table.insert(obs_paths, p) end
+        end
+      end
+    end
+
+    -- fallback: grep wiki for each term
+    if #obs_paths == 0 then
+      local seen = {}
+      for _, term in ipairs(terms) do
+        local hits = vim.fn.systemlist("grep -rli " .. vim.fn.shellescape(term)
+          .. " " .. vim.fn.shellescape(kb .. "/wiki") .. " 2>/dev/null | head -4")
+        for _, h in ipairs(hits) do
+          if not seen[h] then
+            seen[h] = true
+            table.insert(obs_paths, h)
+          end
+        end
+        if #obs_paths >= 8 then break end
+      end
+    end
+
+    -- read actual content of found pages (not just snippets)
+    for _, p in ipairs(obs_paths) do
+      local full = p
+      if vim.fn.filereadable(full) == 0 then full = kb .. "/" .. p end
+      if vim.fn.filereadable(full) == 0 then full = kb .. "/wiki/" .. p end
+      if vim.fn.filereadable(full) == 1 then
+        local lines = vim.fn.readfile(full, "", 40)
+        local title = ""
+        local content = {}
+        local in_fm = false
+        for _, line in ipairs(lines) do
+          if line == "---" then
+            in_fm = not in_fm
+          elseif in_fm then
+            local t = line:match('^title:%s*"?(.-)"?%s*$')
+            if t and t ~= "" and title == "" then title = t end
+          else
+            table.insert(content, line)
+          end
+        end
+        local rel = full:gsub("^" .. vim.pesc(kb) .. "/?", "")
+        if title == "" then title = rel:gsub("%.md$", ""):gsub("/", " > ") end
+        table.insert(kb_pages, {
+          path = rel,
+          title = title,
+          content = table.concat(content, "\n"),
+        })
+      end
+      if #kb_pages >= 8 then break end
+    end
+
+    if #kb_pages > 0 then
+      table.insert(input, "--- raw: knowledge base (" .. #kb_pages .. " pages) ---")
+      for _, page in ipairs(kb_pages) do
+        table.insert(input, "📚 " .. page.title .. " (" .. page.path .. ")")
+        if page.content ~= "" then table.insert(input, page.content) end
         table.insert(input, "")
       end
+      vim.notify("📚 KB: " .. #kb_pages .. " pages" .. (#obs_paths > 0 and vim.fn.executable("obsidian") == 1 and " (obsidian)" or " (grep)"), vim.log.levels.INFO)
     end
   end
 
@@ -742,7 +811,7 @@ local function do_discover(discovery_file, update)
   if #manifest_content > 0 then table.insert(sources, manifest_name) end
   if #ts_lines > 0 then table.insert(sources, "treesitter(" .. ts_file_count .. ")") end
   if #lsp_lines > 0 then table.insert(sources, "lsp(" .. lsp_buf_count .. ")") end
-  if kb_results and #kb_results > 0 then table.insert(sources, "kb(" .. #kb_results .. ")") end
+  if #kb_pages > 0 then table.insert(sources, "kb(" .. #kb_pages .. ")") end
   if #diags > 0 then table.insert(sources, "diagnostics") end
 
   -- ── prompt ────────────────────────────────────────────────────
@@ -775,7 +844,7 @@ local function do_discover(discovery_file, update)
     table.insert(input, "| Dep | Purpose |")
     table.insert(input, "|-----|---------|")
     table.insert(input, "")
-    if kb_results and #kb_results > 0 then
+    if #kb_pages > 0 then
       table.insert(input, "## 📚 Team Knowledge")
       table.insert(input, "From the KB pages above, extract:")
       table.insert(input, "- **PageTitle** — key decision, gotcha, or context")
