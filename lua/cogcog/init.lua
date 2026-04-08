@@ -298,10 +298,60 @@ local builtin_tools = {
     if code ~= 0 then result = result .. "\n(exit " .. code .. ")" end
     return result
   end,
+  diagnostics = function()
+    local diags = vim.diagnostic.get()
+    if #diags == 0 then return "no diagnostics" end
+    local out = {}
+    for _, d in ipairs(diags) do
+      local fname = vim.api.nvim_buf_is_valid(d.bufnr) and vim.fn.fnamemodify(vim.api.nvim_buf_get_name(d.bufnr), ":.") or "?"
+      local sev = ({ "ERROR", "WARN", "INFO", "HINT" })[d.severity] or "?"
+      table.insert(out, fname .. ":" .. (d.lnum + 1) .. " [" .. sev .. "] " .. d.message)
+    end
+    return table.concat(out, "\n")
+  end,
+  lsp_symbols = function(args)
+    local path = args:match('^"(.-)"') or args:match("^'(.-)'") or args
+    local bufnr
+    if path and path ~= "" then
+      bufnr = vim.fn.bufadd(path)
+      vim.fn.bufload(bufnr)
+    else
+      bufnr = vim.api.nvim_get_current_buf()
+    end
+    local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
+    local results = vim.lsp.buf_request_sync(bufnr, "textDocument/documentSymbol", params, 3000)
+    if not results then return "no LSP response" end
+    local out = {}
+    local function collect(symbols, indent)
+      for _, s in ipairs(symbols) do
+        local kind = vim.lsp.protocol.SymbolKind[s.kind] or "?"
+        table.insert(out, string.rep("  ", indent) .. kind .. " " .. s.name .. " :" .. (s.range.start.line + 1))
+        if s.children then collect(s.children, indent + 1) end
+      end
+    end
+    for _, r in pairs(results) do
+      if r.result then collect(r.result, 0) end
+    end
+    return #out > 0 and table.concat(out, "\n") or "no symbols found"
+  end,
+  buffers = function()
+    local out = {}
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(b) then
+        local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":.")
+        if name ~= "" then
+          local mod = vim.bo[b].modified and " [+]" or ""
+          table.insert(out, name .. mod)
+        end
+      end
+    end
+    return #out > 0 and table.concat(out, "\n") or "no named buffers"
+  end,
 }
 
 local function is_read_only_tool(name)
   return name == "read_file" or name == "list_files" or name == "grep"
+    or name == "diagnostics" or name == "lsp_symbols" or name == "buffers"
 end
 
 local function execute_tool(name, args)
@@ -312,11 +362,21 @@ local function execute_tool(name, args)
     local script_name = name:gsub("^tool:", "")
     local script_path = config.cogcog_dir .. "/tools/" .. script_name
     if vim.fn.filereadable(script_path) == 1 then
-      local out = vim.fn.systemlist({ "bash", script_path })
-      local code = vim.v.shell_error
-      local result = table.concat(out, "\n")
-      if code ~= 0 then result = result .. "\n(exit " .. code .. ")" end
-      return result
+      if script_name:match("%.lua$") then
+        local ok, result = pcall(dofile, script_path)
+        if not ok then return "error: " .. tostring(result) end
+        if type(result) == "function" then
+          ok, result = pcall(result)
+          if not ok then return "error: " .. tostring(result) end
+        end
+        return tostring(result or "")
+      else
+        local out = vim.fn.systemlist({ "bash", script_path })
+        local code = vim.v.shell_error
+        local result = table.concat(out, "\n")
+        if code ~= 0 then result = result .. "\n(exit " .. code .. ")" end
+        return result
+      end
     end
     return "error: tool not found: " .. script_name
   end
@@ -685,6 +745,25 @@ local function run_tool_to_workbench(tool_path)
   ctx.show_workbench()
   local name = vim.fn.fnamemodify(tool_path, ":t")
   vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " ---", "" })
+
+  if tool_path:match("%.lua$") then
+    -- lua tools run inside neovim
+    local ok, result = pcall(dofile, tool_path)
+    if not ok then
+      result = "error: " .. tostring(result)
+    elseif type(result) == "function" then
+      ok, result = pcall(result)
+      if not ok then result = "error: " .. tostring(result) end
+    end
+    local out = vim.split(tostring(result or ""), "\n")
+    vim.api.nvim_buf_set_lines(workbench, -1, -1, false, out)
+    vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
+    stream._scroll_buf(workbench)
+    vim.notify("✓ " .. name .. " done")
+    return
+  end
+
+  -- bash tools run as jobs
   local job = vim.fn.jobstart({ "bash", tool_path }, {
     stdout_buffered = false,
     on_stdout = function(_, data)
@@ -759,20 +838,47 @@ end, { desc = "cogcog: run tool → workbench" })
 vim.keymap.set("n", "<leader>cT", function()
   vim.ui.input({ prompt = "tool idea: " }, function(desc)
     if not desc or desc == "" then return end
-    local input = {}
-    ctx.with_system(input)
-    ctx.with_workbench(input)
-    table.insert(input, "Generate a small project-local tool script (bash) for this job:")
-    table.insert(input, desc)
-    table.insert(input, "")
-    table.insert(input, "Rules:")
-    table.insert(input, "- Output ONLY the script content, no explanation before or after")
-    table.insert(input, "- Start with #!/bin/bash and set -euo pipefail")
-    table.insert(input, "- Keep it short and single-purpose")
-    table.insert(input, "- Print human-readable output to stdout")
-    table.insert(input, "- Use relative paths (assume CWD is the project root)")
+    vim.ui.select({ "bash", "lua (neovim-native)" }, { prompt = "language:" }, function(lang)
+      if not lang then return end
+      local is_lua = lang:match("^lua")
 
-    local review_buf = ctx.reuse_or_split("[cogcog-tool-review]", " 🔧 tool review │ a save │ q close")
+      local input = {}
+      ctx.with_system(input)
+      ctx.with_workbench(input)
+
+      if is_lua then
+        table.insert(input, "Generate a Neovim-native Lua tool for this job:")
+        table.insert(input, desc)
+        table.insert(input, "")
+        table.insert(input, "Rules:")
+        table.insert(input, "- Output ONLY the Lua code, no explanation before or after")
+        table.insert(input, "- The file must return a string (the tool output)")
+        table.insert(input, "- You can return a function that returns a string instead")
+        table.insert(input, "- You have full access to the Neovim Lua API: vim.api, vim.fn, vim.diagnostic, vim.lsp, vim.treesitter")
+        table.insert(input, "- Use vim.fn.systemlist() for shell commands if needed")
+        table.insert(input, "- Keep it short and single-purpose")
+        table.insert(input, "- Example:")
+        table.insert(input, '  local diags = vim.diagnostic.get()')
+        table.insert(input, '  local out = {}')
+        table.insert(input, '  for _, d in ipairs(diags) do')
+        table.insert(input, '    local fname = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(d.bufnr), ":.")')
+        table.insert(input, '    table.insert(out, fname .. ":" .. d.lnum .. ": " .. d.message)')
+        table.insert(input, '  end')
+        table.insert(input, '  return table.concat(out, "\\n")')
+      else
+        table.insert(input, "Generate a small project-local tool script (bash) for this job:")
+        table.insert(input, desc)
+        table.insert(input, "")
+        table.insert(input, "Rules:")
+        table.insert(input, "- Output ONLY the script content, no explanation before or after")
+        table.insert(input, "- Start with #!/bin/bash and set -euo pipefail")
+        table.insert(input, "- Keep it short and single-purpose")
+        table.insert(input, "- Print human-readable output to stdout")
+        table.insert(input, "- Use relative paths (assume CWD is the project root)")
+      end
+
+      local ext = is_lua and ".lua" or ".sh"
+      local review_buf = ctx.reuse_or_split("[cogcog-tool-review]", " 🔧 tool review │ a save │ q close")
     stream.to_buf(input, review_buf, {
       raw = true,
       on_done = function()
@@ -800,7 +906,7 @@ vim.keymap.set("n", "<leader>cT", function()
 
         vim.keymap.set("n", "a", function()
           -- prompt for filename
-          vim.ui.input({ prompt = "tool name: ", default = desc:gsub("%s+", "-"):gsub("[^%w%-_]", ""):sub(1, 40) .. ".sh" }, function(name)
+          vim.ui.input({ prompt = "tool name: ", default = desc:gsub("%s+", "-"):gsub("[^%w%-_]", ""):sub(1, 40) .. ext }, function(name)
             if not name or name == "" then return end
             local tools_dir = config.cogcog_dir .. "/tools"
             vim.fn.mkdir(tools_dir, "p")
@@ -815,6 +921,7 @@ vim.keymap.set("n", "<leader>cT", function()
         end, { buffer = review_buf, desc = "cogcog: save tool" })
       end,
     })
+    end)
   end)
 end, { desc = "cogcog: generate tool" })
 

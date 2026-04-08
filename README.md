@@ -92,13 +92,17 @@ The model gets up to 5 tool turns per question, then stops.
 
 **Available tools:**
 
-| Tool | What | Read-only |
-|------|------|-----------|
-| `read_file(path)` | read a project file | yes |
-| `list_files(dir)` | list directory contents | yes |
-| `grep(pattern, path)` | search for patterns | yes |
-| `run_command(cmd)` | execute a shell command | no |
-| `.cogcog/tools/*` | your project scripts | no |
+| Tool | What | Native |
+|------|------|--------|
+| `read_file(path)` | read a project file | shell |
+| `list_files(dir)` | list directory contents | shell |
+| `grep(pattern, path)` | search for patterns | shell |
+| `run_command(cmd)` | execute a shell command | shell |
+| `diagnostics()` | LSP diagnostics across open buffers | neovim |
+| `lsp_symbols(path)` | document symbols via LSP | neovim |
+| `buffers()` | list loaded buffers | neovim |
+| `.cogcog/tools/*.sh` | your bash scripts | shell |
+| `.cogcog/tools/*.lua` | your neovim-native scripts | neovim |
 
 **Approval modes** (`vim.g.cogcog_tool_mode`):
 
@@ -141,11 +145,12 @@ Then: `gf` into a file → `gaip` to understand → `<leader>gy` to pin → `<C-
 
 ### 9. Project tools (`.cogcog/tools/`)
 
-Scripts in `.cogcog/tools/` are project-local tools. The model can use them
-during workbench synthesis, and you can run them directly.
+Scripts in `.cogcog/tools/` are project-local tools. Bash (`.sh`) for shell work,
+Lua (`.lua`) for Neovim-native work. The model can use them during workbench
+synthesis, and you can run them directly.
 
 ```bash
-mkdir -p .cogcog/tools
+# bash tool — shell work
 cat > .cogcog/tools/test-changed.sh << 'EOF'
 #!/bin/bash
 # Run tests for files changed since last commit
@@ -154,11 +159,24 @@ EOF
 chmod +x .cogcog/tools/test-changed.sh
 ```
 
-Generate new tools with the LLM:
+```lua
+-- lua tool — neovim-native (.cogcog/tools/unused-imports.lua)
+-- Find files with LSP diagnostics about unused imports
+local diags = vim.diagnostic.get()
+local out = {}
+for _, d in ipairs(diags) do
+  if d.message:match("[Uu]nused") then
+    local f = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(d.bufnr), ":.")
+    table.insert(out, f .. ":" .. (d.lnum + 1) .. " " .. d.message)
+  end
+end
+return table.concat(out, "\n")
+```
+
+Generate new tools with the LLM — choose bash or lua:
 
 ```
-<leader>cT → "tool that finds unused exports"
-  → model generates script → review buffer → a to save → .cogcog/tools/
+<leader>cT → "tool that finds unused exports" → [bash / lua] → review → save
 ```
 
 The self-evolution loop:

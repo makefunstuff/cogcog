@@ -166,6 +166,9 @@ function M.with_tools(input)
     "list_files(dir) — list files in a directory (default: .)",
     "grep(pattern, path) — search for a regex pattern (default path: .)",
     "run_command(cmd) — execute a shell command and return stdout+stderr",
+    "diagnostics() — get LSP diagnostics across all open buffers (neovim-native)",
+    "lsp_symbols(path) — get document symbols via LSP (neovim-native)",
+    "buffers() — list currently loaded buffers (neovim-native)",
   }
 
   -- discover .cogcog/tools/ scripts
