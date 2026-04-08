@@ -407,7 +407,6 @@ local function plan_send(question)
             })
             stream._scroll_buf(workbench)
           end
-          end
         end)
       end
     end,
