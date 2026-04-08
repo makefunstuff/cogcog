@@ -65,6 +65,8 @@ PLANNING                                        *cogcog-plan*
 <leader>gy      (visual) Pin selection to workbench.
 <leader>g!      Execute a shell command; output streams to the workbench.
                 Opens workbench automatically. Cancellable with <C-c>.
+<leader>ct      Pick and run a project tool from `.cogcog/tools/`.
+                Output streams to the workbench. Tools are plain scripts.
 
 VIM STATE AS CONTEXT                            *cogcog-context*
 

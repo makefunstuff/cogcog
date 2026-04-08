@@ -557,6 +557,82 @@ vim.keymap.set("n", "<leader>g!", function()
   end)
 end, { desc = "cogcog: exec → workbench" })
 
+local function run_tool_to_workbench(tool_path)
+  local workbench = ctx.get_or_create_workbench()
+  ctx.show_workbench()
+  local name = vim.fn.fnamemodify(tool_path, ":t")
+  vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " ---", "" })
+  local job = vim.fn.jobstart({ "bash", tool_path }, {
+    stdout_buffered = false,
+    on_stdout = function(_, data)
+      if not data then return end
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(workbench) then return end
+        for _, line in ipairs(data) do
+          if line ~= "" then
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { line })
+          end
+        end
+        stream._scroll_buf(workbench)
+      end)
+    end,
+    on_stderr = function(_, data)
+      if not data then return end
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(workbench) then return end
+        for _, line in ipairs(data) do
+          if line ~= "" then
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { line })
+          end
+        end
+        stream._scroll_buf(workbench)
+      end)
+    end,
+    on_exit = function(_, code)
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(workbench) then return end
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- exit " .. code .. " ---", "" })
+        stream._scroll_buf(workbench)
+        vim.notify(code == 0 and ("✓ " .. name .. " done") or ("✗ " .. name .. " exit " .. code),
+          code == 0 and vim.log.levels.INFO or vim.log.levels.WARN)
+      end)
+    end,
+  })
+  if type(job) == "number" and job > 0 then stream.active_jobs[job] = true end
+end
+
+vim.keymap.set("n", "<leader>ct", function()
+  local tools_dir = config.cogcog_dir .. "/tools"
+  if vim.fn.isdirectory(tools_dir) == 0 then
+    vim.notify("cogcog: no tools yet — create scripts in .cogcog/tools/", vim.log.levels.INFO)
+    return
+  end
+  local files = vim.fn.globpath(tools_dir, "*", false, true)
+  -- filter to executable scripts
+  local tools = {}
+  for _, f in ipairs(files) do
+    local name = vim.fn.fnamemodify(f, ":t")
+    if not name:match("^%.") and not name:match("~$") then
+      table.insert(tools, { name = name, path = f })
+    end
+  end
+  if #tools == 0 then
+    vim.notify("cogcog: .cogcog/tools/ is empty", vim.log.levels.INFO)
+    return
+  end
+  local labels = {}
+  for _, t in ipairs(tools) do table.insert(labels, t.name) end
+  vim.ui.select(labels, { prompt = "tool:" }, function(choice)
+    if not choice then return end
+    for _, t in ipairs(tools) do
+      if t.name == choice then
+        run_tool_to_workbench(t.path)
+        return
+      end
+    end
+  end)
+end, { desc = "cogcog: run tool → workbench" })
+
 vim.keymap.set("n", "<leader>co", function()
   if ctx.workbench_win() then vim.api.nvim_win_close(ctx.workbench_win(), false) else ctx.show_workbench() end
 end, { desc = "cogcog: workbench" })

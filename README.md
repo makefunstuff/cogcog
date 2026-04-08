@@ -64,7 +64,7 @@ Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a`
 <leader>co                          close — back to stateless
 ```
 
-The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run commands with `<leader>g!`, import context with `:read !git diff`, edit freely with normal vim.
+The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run commands with `<leader>g!`, run project tools with `<leader>ct`, edit freely with normal vim.
 
 ### 6. Batch (quickfix)
 
@@ -95,6 +95,27 @@ gd → gd → gd                       navigate normally
 <leader>gj                          how do these locations connect?
 <leader>g.                          any bugs in my changes?
 ```
+
+### 9. Project tools (`.cogcog/tools/`)
+
+Scripts in `.cogcog/tools/` are project-local tools cogcog knows about.
+
+```bash
+# create a tool
+mkdir -p .cogcog/tools
+cat > .cogcog/tools/test-changed.sh << 'EOF'
+#!/bin/bash
+git diff --name-only HEAD | grep -E '\.ts$' | xargs npx jest --findRelatedTests
+EOF
+chmod +x .cogcog/tools/test-changed.sh
+```
+
+```
+<leader>ct                          pick a tool, run it, output → workbench
+<C-g> → "what failed?"             ask about the output
+```
+
+Tools are plain scripts. Generate them with `<C-g>`, review, save to `.cogcog/tools/`.
 
 ## The loop
 
@@ -180,6 +201,7 @@ Requires: `bash`, `curl`, `jq`.
 | `<leader>co` | n | toggle workbench |
 | `<leader>cc` | n | clear workbench |
 | `<leader>g!` | n | exec command → workbench |
+| `<leader>ct` | n | run project tool → workbench |
 | `<leader>gj` | n | jump trail |
 | `<leader>g.` | n | review recent changes |
 | `<leader>gq` | n | summarize quickfix |
