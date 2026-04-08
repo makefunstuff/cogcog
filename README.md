@@ -137,6 +137,19 @@ Quickfix is the hard boundary. Cogcog never roams beyond it.
 <leader>cd                          scout the project
 ```
 
+Discovery gathers from multiple sources before asking the model:
+
+| Source | What |
+|--------|------|
+| File tree | directory structure (3 levels) |
+| Package manifest | dependencies, scripts, metadata |
+| Entry points | main/index/app files |
+| Git log | recent 20 commits |
+| README | project description |
+| **Treesitter** | top-level declarations (functions, types, structs) |
+| **LSP symbols** | document symbols from loaded buffers |
+| **Diagnostics** | error/warning counts |
+
 Produces a two-part discovery note:
 - **Project Map** — every file organized by domain, `gf`-navigable
 - **Candidate Files** — the 5–15 files to read first

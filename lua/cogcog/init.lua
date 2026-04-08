@@ -527,6 +527,101 @@ local function do_discover(discovery_file, update)
       table.insert(input, "")
     end
   end
+
+  -- LSP workspace symbols (if available)
+  local lsp_lines = {}
+  local clients = vim.lsp.get_clients()
+  if #clients > 0 then
+    -- collect document symbols from loaded buffers with LSP
+    local seen = {}
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == "" then
+        local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":.")
+        if name ~= "" and not seen[name] then
+          seen[name] = true
+          local params = { textDocument = vim.lsp.util.make_text_document_params(b) }
+          local results = vim.lsp.buf_request_sync(b, "textDocument/documentSymbol", params, 2000)
+          if results then
+            local function collect(symbols, indent)
+              for _, s in ipairs(symbols) do
+                local kind = vim.lsp.protocol.SymbolKind[s.kind] or "?"
+                table.insert(lsp_lines, string.rep("  ", indent) .. kind .. " " .. s.name)
+                if s.children and indent < 1 then collect(s.children, indent + 1) end
+              end
+            end
+            local file_syms = {}
+            for _, r in pairs(results) do
+              if r.result and #r.result > 0 then collect(r.result, 0) end
+            end
+            if #lsp_lines > #file_syms then
+              table.insert(file_syms, 1, "  " .. name .. ":")
+            end
+          end
+        end
+      end
+    end
+  end
+  if #lsp_lines > 0 then
+    table.insert(input, "--- LSP symbols (loaded buffers) ---")
+    table.insert(input, "")
+    vim.list_extend(input, lsp_lines)
+    table.insert(input, "")
+  end
+
+  -- treesitter top-level declarations from key files
+  local ts_lines = {}
+  local key_patterns = { "main", "init", "index", "app", "lib", "mod", "server", "config" }
+  local key_files = vim.fn.systemlist("find . -maxdepth 3 -type f \\( -name '*.lua' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.zig' \\) -not -path '*node_modules*' -not -path '*/.git/*' -not -path '*/vendor/*' 2>/dev/null | head -30")
+  for _, file in ipairs(key_files) do
+    local bufnr = vim.fn.bufadd(file)
+    vim.fn.bufload(bufnr)
+    local lang = vim.treesitter.language.get_lang(vim.bo[bufnr].filetype)
+    if lang and pcall(vim.treesitter.get_parser, bufnr, lang) then
+      local parser = vim.treesitter.get_parser(bufnr, lang)
+      local tree = parser:parse()[1]
+      if tree then
+        local root = tree:root()
+        local file_decls = {}
+        for child in root:iter_children() do
+          local type = child:type()
+          if type:match("function") or type:match("class") or type:match("struct")
+            or type:match("impl") or type:match("interface") or type:match("type")
+            or type:match("method") or type:match("enum") or type:match("const")
+            or type:match("export") or type:match("pub") then
+            local start_row = child:start()
+            local first_line = vim.api.nvim_buf_get_lines(bufnr, start_row, start_row + 1, false)[1] or ""
+            -- trim to signature only
+            first_line = first_line:gsub("{%s*$", ""):gsub("%s+$", "")
+            if #first_line > 120 then first_line = first_line:sub(1, 117) .. "..." end
+            if first_line ~= "" then
+              table.insert(file_decls, "  :" .. (start_row + 1) .. " " .. first_line)
+            end
+          end
+        end
+        if #file_decls > 0 then
+          table.insert(ts_lines, file .. ":")
+          vim.list_extend(ts_lines, file_decls)
+        end
+      end
+    end
+  end
+  if #ts_lines > 0 then
+    table.insert(input, "--- treesitter declarations (top-level) ---")
+    table.insert(input, "")
+    vim.list_extend(input, ts_lines)
+    table.insert(input, "")
+  end
+
+  -- LSP diagnostics summary
+  local diags = vim.diagnostic.get()
+  if #diags > 0 then
+    local counts = { 0, 0, 0, 0 }
+    for _, d in ipairs(diags) do counts[d.severity] = (counts[d.severity] or 0) + 1 end
+    table.insert(input, "--- diagnostics summary ---")
+    table.insert(input, "")
+    table.insert(input, "errors: " .. counts[1] .. "  warnings: " .. counts[2] .. "  info: " .. counts[3] .. "  hints: " .. counts[4])
+    table.insert(input, "")
+  end
   if update and vim.fn.filereadable(discovery_file) == 1 then
     table.insert(input, "--- previous discovery ---")
     table.insert(input, "")
