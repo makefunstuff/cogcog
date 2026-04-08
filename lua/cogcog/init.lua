@@ -713,7 +713,11 @@ local function do_discover(discovery_file, update)
     if manifest_name then
       for _, line in ipairs(manifest_content) do
         local n = line:match('"name"%s*:%s*"(.-)"') or line:match('^name%s*=%s*"(.-)"') or line:match('^module%s+(%S+)')
-        if n then table.insert(terms, n:gsub(".*/", "")); break end
+        if n then
+          local clean = n:gsub(".*/", "")
+          table.insert(terms, clean)
+          break
+        end
       end
     end
     for _, line in ipairs(readme or {}) do
