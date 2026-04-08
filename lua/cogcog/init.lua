@@ -347,6 +347,21 @@ local builtin_tools = {
     end
     return #out > 0 and table.concat(out, "\n") or "no named buffers"
   end,
+  kb_search = function(args)
+    local query = args:match('^"(.-)"') or args:match("^'(.-)'") or args
+    if not query or query == "" then return "error: no query given" end
+    local results = ctx.kb_search(query, 5)
+    if not results then return "no knowledge base configured (set COGCOG_KB)" end
+    if #results == 0 then return "no results for: " .. query end
+    local out = {}
+    for _, r in ipairs(results) do
+      table.insert(out, "## " .. r.title)
+      table.insert(out, r.path)
+      table.insert(out, r.snippet)
+      table.insert(out, "")
+    end
+    return table.concat(out, "\n")
+  end,
 }
 
 local function is_read_only_tool(name)
@@ -622,6 +637,44 @@ local function do_discover(discovery_file, update)
     table.insert(input, "errors: " .. counts[1] .. "  warnings: " .. counts[2] .. "  info: " .. counts[3] .. "  hints: " .. counts[4])
     table.insert(input, "")
   end
+
+  -- knowledge base enrichment
+  local kb = config.kb_path()
+  if kb then
+    -- derive search terms from project name and key files
+    local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ":t")
+    local search_terms = { project_name }
+    -- add terms from package manifest
+    local manifest = vim.fn.glob("package.json") ~= "" and "package.json"
+      or vim.fn.glob("Cargo.toml") ~= "" and "Cargo.toml"
+      or vim.fn.glob("go.mod") ~= "" and "go.mod"
+      or nil
+    if manifest then
+      local mlines = vim.fn.readfile(manifest, "", 10)
+      for _, line in ipairs(mlines) do
+        local name = line:match('"name"%s*:%s*"(.-)"') or line:match('^name%s*=%s*"(.-)"') or line:match('^module%s+(%S+)')
+        if name then
+          table.insert(search_terms, name:gsub(".*/", ""))
+          break
+        end
+      end
+    end
+    -- search KB for each term
+    local kb_results = ctx.kb_search(table.concat(search_terms, " "), 8)
+    if kb_results and #kb_results > 0 then
+      table.insert(input, "--- knowledge base context ---")
+      table.insert(input, "")
+      table.insert(input, "Relevant pages from the team knowledge base:")
+      table.insert(input, "")
+      for _, r in ipairs(kb_results) do
+        table.insert(input, "### " .. r.title)
+        table.insert(input, "`" .. r.path .. "`")
+        table.insert(input, r.snippet)
+        table.insert(input, "")
+      end
+    end
+  end
+
   if update and vim.fn.filereadable(discovery_file) == 1 then
     table.insert(input, "--- previous discovery ---")
     table.insert(input, "")
@@ -662,6 +715,15 @@ local function do_discover(discovery_file, update)
     table.insert(input, "## 🗺 Start Here")
     table.insert(input, "The 5-10 files to read first, in order, with WHY each matters.")
     table.insert(input, "Format: 1. `path/to/file.ext` — what you'll learn by reading this")
+    if kb then
+      table.insert(input, "")
+      table.insert(input, "## 📚 From the Knowledge Base")
+      table.insert(input, "If knowledge base context was provided above, include a section with:")
+      table.insert(input, "- Relevant team decisions, architecture notes, or gotchas")
+      table.insert(input, "- Links to KB pages as `kb-path` for reference")
+      table.insert(input, "- Operational context: deployment, monitoring, known issues")
+      table.insert(input, "If no KB context was provided, skip this section.")
+    end
     table.insert(input, "")
     table.insert(input, "Make every path gf-navigable. Use emoji sparingly for section headers only.")
     table.insert(input, "Be concrete and specific — name real functions, real types, real patterns.")

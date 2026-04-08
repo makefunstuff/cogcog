@@ -101,6 +101,7 @@ The model gets up to 5 tool turns per question, then stops.
 | `diagnostics()` | LSP diagnostics across open buffers | neovim |
 | `lsp_symbols(path)` | document symbols via LSP | neovim |
 | `buffers()` | list loaded buffers | neovim |
+| `kb_search(query)` | search knowledge base | neovim |
 | `.cogcog/tools/*.sh` | your bash scripts | shell |
 | `.cogcog/tools/*.lua` | your neovim-native scripts | neovim |
 
@@ -149,6 +150,7 @@ Discovery gathers from multiple sources before asking the model:
 | **Treesitter** | top-level declarations (functions, types, structs) |
 | **LSP symbols** | document symbols from loaded buffers |
 | **Diagnostics** | error/warning counts |
+| **Knowledge base** | relevant team docs, decisions, gotchas (if `COGCOG_KB` set) |
 
 Produces a two-part discovery note:
 - **Project Map** — every file organized by domain, `gf`-navigable
@@ -267,6 +269,16 @@ export COGCOG_API_KEY=your-key
 Both `copilot` and `codex` read OAuth tokens from [pi](https://github.com/badlogic/pi-mono)'s `~/.pi/agent/auth.json`. Run `pi /login` once to authenticate.
 
 Requires: `bash`, `curl`, `jq`.
+
+### Knowledge base (optional)
+
+```bash
+export COGCOG_KB=~/path/to/your/knowledge-base
+```
+
+When set, discovery dashboards include relevant KB pages, and the
+`kb_search` tool becomes available during workbench synthesis.
+The KB should have a `wiki/` directory with markdown files.
 
 ## All keymaps
 

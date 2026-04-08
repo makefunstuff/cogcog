@@ -40,4 +40,11 @@ function M.agent_cmd()
   end
 end
 
+function M.kb_path()
+  if vim.env.COGCOG_KB and vim.trim(vim.env.COGCOG_KB) ~= "" then
+    local p = vim.env.COGCOG_KB
+    if vim.fn.isdirectory(p) == 1 then return p end
+  end
+end
+
 return M

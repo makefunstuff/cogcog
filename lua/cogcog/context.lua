@@ -159,6 +159,54 @@ end
 -- Backward-compatible alias while the rest of the plugin migrates.
 M.with_panel = M.with_workbench
 
+-- Search the knowledge base for relevant content.
+function M.kb_search(query, max_results)
+  local kb = config.kb_path()
+  if not kb then return nil end
+  max_results = max_results or 10
+  local wiki_dir = kb .. "/wiki"
+  if vim.fn.isdirectory(wiki_dir) == 0 then return nil end
+  -- grep the wiki for the query terms
+  local terms = {}
+  for word in query:gmatch("%S+") do
+    if #word > 2 then table.insert(terms, word) end
+  end
+  if #terms == 0 then return nil end
+  local pattern = table.concat(terms, "\\|")
+  local cmd = "grep -rli " .. vim.fn.shellescape(pattern) .. " " .. vim.fn.shellescape(wiki_dir) .. " 2>/dev/null | head -" .. max_results
+  local files = vim.fn.systemlist(cmd)
+  if #files == 0 then return nil end
+  local results = {}
+  for _, f in ipairs(files) do
+    local rel = vim.fn.fnamemodify(f, ":.")
+    local lines = vim.fn.readfile(f, "", 30)
+    local title = lines[1] or rel
+    title = title:gsub("^#+%s*", "")
+    -- grab first non-empty content lines
+    local snippet = {}
+    for i = 2, math.min(#lines, 8) do
+      if lines[i] ~= "" then table.insert(snippet, lines[i]) end
+    end
+    table.insert(results, { path = rel, title = title, snippet = table.concat(snippet, "\n") })
+  end
+  return results
+end
+
+-- Include KB context in input if relevant.
+function M.with_kb(input, query)
+  local results = M.kb_search(query)
+  if not results or #results == 0 then return input end
+  table.insert(input, "--- knowledge base context ---")
+  table.insert(input, "")
+  for _, r in ipairs(results) do
+    table.insert(input, "### " .. r.title)
+    table.insert(input, "`" .. r.path .. "`")
+    table.insert(input, r.snippet)
+    table.insert(input, "")
+  end
+  return input
+end
+
 -- Tool definitions for workbench synthesis.
 function M.with_tools(input)
   local tools = {
@@ -169,6 +217,7 @@ function M.with_tools(input)
     "diagnostics() — get LSP diagnostics across all open buffers (neovim-native)",
     "lsp_symbols(path) — get document symbols via LSP (neovim-native)",
     "buffers() — list currently loaded buffers (neovim-native)",
+    "kb_search(query) — search the knowledge base for relevant pages (if configured)",
   }
 
   -- discover .cogcog/tools/ scripts
