@@ -166,22 +166,45 @@ local function kb_build_index(wiki_dir)
   local index = {}
   for _, f in ipairs(files) do
     local rel = f:gsub("^" .. vim.pesc(wiki_dir) .. "/?", "")
-    local lines = vim.fn.readfile(f, "", 6)
+    local lines = vim.fn.readfile(f, "", 20)
     local title = ""
     local desc = ""
+    local in_frontmatter = false
     for _, line in ipairs(lines) do
-      if line:match("^#") and title == "" then
+      if line == "---" then
+        in_frontmatter = not in_frontmatter
+      elseif in_frontmatter then
+        -- parse YAML frontmatter
+        local t = line:match('^title:%s*"?(.-)"?%s*$')
+        if t and t ~= "" then title = t end
+      elseif line:match("^#") and title == "" then
         title = line:gsub("^#+%s*", "")
-      elseif line ~= "" and desc == "" and not line:match("^[-#]") then
+      elseif line ~= "" and desc == "" and not line:match("^[-#]") and not in_frontmatter then
         desc = line:sub(1, 120)
       end
     end
+    if title == "" then title = rel:gsub("%.md$", ""):gsub("/", " > ") end
     table.insert(index, { path = f, rel = rel, title = title, desc = desc })
   end
   return index
 end
 
--- LLM-powered KB search: send page index to model, get back relevant paths.
+-- Try Obsidian CLI search (requires running Obsidian app).
+local function kb_obsidian_search(vault_name, query, max_results)
+  if vim.fn.executable("obsidian") ~= 1 then return nil end
+  local cmd = "obsidian search" ..
+    " query=" .. vim.fn.shellescape(query) ..
+    " vault=" .. vim.fn.shellescape(vault_name) ..
+    " limit=" .. max_results ..
+    " format=json 2>/dev/null"
+  local raw = vim.fn.system(cmd)
+  if vim.v.shell_error ~= 0 or raw == "" or raw:match("^%s*$") then return nil end
+  local ok, parsed = pcall(vim.json.decode, raw)
+  if not ok or type(parsed) ~= "table" or #parsed == 0 then return nil end
+  return parsed
+end
+
+-- LLM-powered KB search: try Obsidian CLI first, fall back to LLM index search.
 function M.kb_search(query, max_results)
   local kb = config.kb_path()
   if not kb then return nil end
@@ -189,10 +212,55 @@ function M.kb_search(query, max_results)
   local wiki_dir = kb .. "/wiki"
   if vim.fn.isdirectory(wiki_dir) == 0 then return nil end
 
+  -- derive vault name from kb path
+  local vault_name = vim.fn.fnamemodify(kb, ":t")
+
+  -- ── try Obsidian CLI first (instant, uses built-in search index) ──
+  local obs_results = kb_obsidian_search(vault_name, query, max_results)
+  if obs_results then
+    local results = {}
+    for _, hit in ipairs(obs_results) do
+      local path = hit.path or hit.file or hit
+      if type(path) == "string" then
+        local full = kb .. "/" .. path
+        if vim.fn.filereadable(full) == 0 then full = path end
+        local flines = vim.fn.filereadable(full) == 1 and vim.fn.readfile(full, "", 20) or {}
+        local title = ""
+        local snippet = {}
+        local in_fm = false
+        for i, line in ipairs(flines) do
+          if line == "---" then in_fm = not in_fm
+          elseif in_fm then
+            local t = line:match('^title:%s*"?(.-)"?%s*$')
+            if t and t ~= "" then title = t end
+          elseif line:match("^#") and title == "" then
+            title = line:gsub("^#+%s*", "")
+          elseif line ~= "" and not in_fm and i > 1 then
+            table.insert(snippet, line)
+          end
+        end
+        if title == "" then title = path:gsub("%.md$", ""):gsub("/", " > ") end
+        table.insert(results, {
+          path = path,
+          full_path = full,
+          title = title,
+          snippet = table.concat(snippet, "\n", 1, math.min(#snippet, 8)),
+        })
+      end
+      if #results >= max_results then break end
+    end
+    if #results > 0 then
+      vim.notify("📚 KB: " .. #results .. " pages via Obsidian", vim.log.levels.INFO)
+      return results
+    end
+  end
+
+  -- ── fallback: LLM-powered search ─────────────────────────────
   local index = kb_build_index(wiki_dir)
   if not index or #index == 0 then return nil end
 
-  -- build compact index for the model
+  vim.notify("📚 KB: searching " .. #index .. " pages via LLM...", vim.log.levels.INFO)
+
   local prompt_lines = {
     "You are a knowledge base search engine.",
     "Given a query and a page index, return the most relevant page paths.",
@@ -223,7 +291,6 @@ function M.kb_search(query, max_results)
   local lookup = {}
   for _, entry in ipairs(index) do
     lookup[entry.rel] = entry
-    -- also index by path fragments (model might return partial paths)
     local basename = entry.rel:match("[^/]+$") or entry.rel
     if not lookup[basename] then lookup[basename] = entry end
   end
@@ -233,13 +300,12 @@ function M.kb_search(query, max_results)
   local seen = {}
   for _, line in ipairs(raw_output) do
     line = vim.trim(line)
-    line = line:gsub("^%d+[%.%)%s]+", "")  -- strip numbering
-    line = line:gsub("^`(.-)`.*", "%1")     -- unwrap backticks
-    line = line:gsub("^%-+%s*", "")         -- strip list markers
+    line = line:gsub("^%d+[%.%)%s]+", "")
+    line = line:gsub("^`(.-)`.*", "%1")
+    line = line:gsub("^%-+%s*", "")
     line = vim.trim(line)
     if line == "" then goto continue end
 
-    -- try exact match, then suffix match
     local entry = lookup[line]
     if not entry then
       for _, e in ipairs(index) do
@@ -265,6 +331,10 @@ function M.kb_search(query, max_results)
     end
     if #results >= max_results then break end
     ::continue::
+  end
+
+  if #results > 0 then
+    vim.notify("📚 KB: " .. #results .. " pages via LLM", vim.log.levels.INFO)
   end
   return results
 end
