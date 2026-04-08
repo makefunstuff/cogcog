@@ -229,8 +229,13 @@ dap                                 " delete a section
 ## Shell
 
 ```bash
+# with copilot backend (opus 4.6 smart, sonnet 4.6 fast — no API key needed)
+export COGCOG_BACKEND=copilot
+echo "explain CRDs" | cogcog --raw          # fast: sonnet 4.6
+git diff --staged | cogcog "review this"    # smart: opus 4.6
+
+# or with direct API keys
 echo "explain CRDs" | cogcog --raw
-git diff --staged | cogcog --raw "review this"
 cat src/main.ts | cogcog --raw "any bugs?"
 ```
 

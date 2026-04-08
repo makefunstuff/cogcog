@@ -150,14 +150,45 @@ When installed from git, Cogcog uses the bundled `bin/cogcog` automatically.
 For the bundled transport you need:
 
 - `bash`
-- `curl`
-- `jq`
-- one model provider configured via environment variables
+- `curl` and `jq` (for anthropic/openai backends)
+- one model provider configured
 
-Examples:
+### Quickest setup: copilot backend (recommended)
+
+If you have [pi](https://github.com/badlogic/pi-mono) installed and authenticated
+with GitHub Copilot:
 
 ```bash
-# Anthropic
+export COGCOG_BACKEND=copilot
+```
+
+That's it. Reads pi's OAuth token directly, calls the Copilot API with plain `curl`.
+**14ms overhead**, auto-refreshes expired tokens.
+
+- Smart model (default): **claude-opus-4.6**
+- Fast model (`--raw`): **claude-sonnet-4.6**
+
+```bash
+# optionally override
+export COGCOG_MODEL=claude-sonnet-4.5   # smart override
+export COGCOG_FAST_MODEL=claude-haiku-4.5  # fast override
+```
+
+### Alternative: codex backend
+
+For ChatGPT Plus/Pro Codex subscription:
+
+```bash
+export COGCOG_BACKEND=codex
+# default model: gpt-5.4
+```
+
+Same 18ms overhead, same auto-refresh from pi's `auth.json`.
+
+### Direct API backends
+
+```bash
+# Anthropic (default backend)
 export ANTHROPIC_API_KEY="sk-ant-..."
 
 # or any OpenAI-compatible endpoint
@@ -166,6 +197,18 @@ export COGCOG_API_URL=http://localhost:8090/v1/chat/completions
 export COGCOG_API_KEY=your-key
 export COGCOG_FAST_MODEL="your-model"
 ```
+
+### Slow but universal: pi backend
+
+If you need a provider that isn't anthropic/openai/codex/copilot:
+
+```bash
+export COGCOG_BACKEND=pi
+export COGCOG_PI_PROVIDER=google     # any pi provider
+```
+
+This delegates to `pi -p` (~0.7s startup overhead). Fine for `<leader>gc` / `<leader>gx`,
+not ideal for fast verbs.
 
 ## Configuration
 

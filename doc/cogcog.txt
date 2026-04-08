@@ -134,13 +134,24 @@ COGCOG_CHECKER      Optional stronger command for check/discover.
                 When unset, check/discover fall back to cogcog --raw.
 
                                                 *cogcog-backend*
-COGCOG_BACKEND      "anthropic" or "openai" (default: anthropic)
+COGCOG_BACKEND      "anthropic", "openai", "codex", "copilot", or "pi"
+                (default: anthropic)
+                codex: reads pi's Codex OAuth, calls API with curl (18ms).
+                copilot: reads pi's Copilot OAuth, calls API with curl (14ms).
+                  smart model: claude-opus-4.6
+                  fast model (--raw): claude-sonnet-4.6
+                pi: delegates to `pi -p` (~0.7s startup).
+                See |cogcog-pi-provider|.
+
+                                                *cogcog-pi-provider*
+COGCOG_PI_PROVIDER  Provider for pi backend (default: openai-codex).
+                Any provider pi supports: anthropic, google, etc.
 
                                                 *cogcog-api-url*
-COGCOG_API_URL      API endpoint.
+COGCOG_API_URL      API endpoint (anthropic/openai backends only).
 
                                                 *cogcog-api-key*
-COGCOG_API_KEY      API key.
+COGCOG_API_KEY      API key (anthropic/openai backends only).
 
                                                 *cogcog-model*
 COGCOG_MODEL        Default model when FAST_MODEL not set.
