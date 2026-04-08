@@ -62,7 +62,7 @@ PLANNING                                        *cogcog-plan*
                 From workbench: sends the current workbench as-is.
 
                                                 *cogcog-cy*
-<leader>cy      (visual) Pin selection to workbench.
+<leader>gy      (visual) Pin selection to workbench.
 
 VIM STATE AS CONTEXT                            *cogcog-context*
 
@@ -185,7 +185,7 @@ Optional: >
     <leader>cd      discover
 <
 Other: >
-    <leader>cy      pin
+    <leader>gy      pin
     <leader>co      workbench
     <leader>cp      improve prompt
     <leader>cc      clear

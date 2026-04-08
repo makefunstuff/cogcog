@@ -41,7 +41,7 @@ gsip / gss          generate → code buffer
 ## Workbench
 
 ```text
-<leader>cy          pin selection
+<leader>gy          pin selection
 <leader>co          toggle workbench
 <leader>cc          clear workbench
 <leader>cp          improve prompt from bad response

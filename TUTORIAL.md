@@ -327,13 +327,13 @@ Each `<C-g>` continues in the workbench. The workbench accumulates your conversa
 Navigate to file A, visual select a relevant function:
 
 ```
-<leader>cy          pin to workbench
+<leader>gy          pin to workbench
 ```
 
 Navigate to file B, visual select another function:
 
 ```
-<leader>cy          pin again
+<leader>gy          pin again
 ```
 
 Now ask about both:
@@ -425,7 +425,7 @@ In the discovery note:
 ```
 /### Auth                       jump to auth section
 V/### Database                  select the auth domain
-<leader>cy                      pin to workbench
+<leader>gy                      pin to workbench
 <C-g> → "simplify token refresh"
 ```
 
@@ -588,9 +588,9 @@ gaip                                    " understand the first error
 :edit src/auth.ts                       " open suspect file
 :vsplit src/session.ts                  " open related file
 gaip                                    " explain with both visible
-<leader>cy                              " pin auth code to workbench
+<leader>gy                              " pin auth code to workbench
 :edit src/middleware.ts
-<leader>cy                              " pin middleware too
+<leader>gy                              " pin middleware too
 <C-g> → "can these race on session refresh?"
 ```
 
@@ -618,7 +618,7 @@ gaip                                    " explain with both visible
 | `<leader>grip` | refactor in-place | fast |
 | `<leader>gcaf` | check / review | fast |
 | `<C-g>` | plan / synthesize (workbench) | fast |
-| `<leader>cy` | pin to workbench | instant |
+| `<leader>gy` | pin to workbench | instant |
 | `<leader>co` | toggle workbench | instant |
 | `<leader>cc` | clear workbench | instant |
 | `<leader>gj` | jump trail context | fast |

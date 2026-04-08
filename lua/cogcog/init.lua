@@ -503,7 +503,7 @@ vim.keymap.set("n", "<C-g>", function()
   end
 end, { desc = "cogcog: plan / continue" })
 
-vim.keymap.set("v", "<leader>cy", function()
+vim.keymap.set("v", "<leader>gy", function()
   ctx.visual_then(function(lines, source)
     local workbench = ctx.get_or_create_workbench()
     vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- " .. source .. " ---", "" })

@@ -154,8 +154,8 @@ Pinned snippets, pasted docs, command output, and model responses can all live i
 ## Pin from multiple files
 
 ```vim
-" file A: visual select → <leader>cy
-" file B: visual select → <leader>cy
+" file A: visual select → <leader>gy
+" file B: visual select → <leader>gy
 <C-g> → "can these race?"
 ```
 
@@ -277,7 +277,7 @@ Pin a domain into the workbench:
 ```text
 /### Auth                           jump to auth section
 V/### Database                      select the auth domain
-<leader>cy                          pin to workbench
+<leader>gy                          pin to workbench
 <C-g> → "simplify the token refresh"
 ```
 

@@ -64,7 +64,7 @@ Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a`
 <leader>co                          close — back to stateless
 ```
 
-The workbench is a plain markdown buffer. Pin code with `<leader>cy`, import context with `:read !git diff`, edit freely with normal vim.
+The workbench is a plain markdown buffer. Pin code with `<leader>gy`, import context with `:read !git diff`, edit freely with normal vim.
 
 ### 6. Batch (quickfix)
 
@@ -86,7 +86,7 @@ Produces a two-part discovery note:
 - **Project Map** — every file organized by domain, `gf`-navigable
 - **Candidate Files** — the 5–15 files to read first
 
-Then: `gf` into a file → `gaip` to understand → `<leader>cy` to pin → `<C-g>` to synthesize.
+Then: `gf` into a file → `gaip` to understand → `<leader>gy` to pin → `<C-g>` to synthesize.
 
 ### 8. Investigate
 
@@ -111,7 +111,7 @@ verify              <leader>gcaf → done or back to refactor
 ```
 
 ```
-orient              <leader>cd → gf → gaip → <leader>cy
+orient              <leader>cd → gf → gaip → <leader>gy
                     ↓
 plan                <leader>co → <C-g> → <C-g>
                     ↓
@@ -123,7 +123,7 @@ batch               :grep → <leader>gR → :make
 | Tier | What | You control it by |
 |------|------|-------------------|
 | **Hard scope** | the text you act on | motion, selection, buffer |
-| **Explicit imports** | text you brought in | workbench, `<leader>cy`, `:read` |
+| **Explicit imports** | text you brought in | workbench, `<leader>gy`, `:read` |
 | **Soft context** | nearby signals | visible windows |
 
 Your screen is your context. Split two files side by side → `gaip` sees both.
@@ -176,7 +176,7 @@ Requires: `bash`, `curl`, `jq`.
 | `<leader>gc{motion}` | n | check |
 | `<leader>gc` | v | check selection |
 | `<C-g>` | n | synthesize in workbench |
-| `<leader>cy` | v | pin to workbench |
+| `<leader>gy` | v | pin to workbench |
 | `<leader>co` | n | toggle workbench |
 | `<leader>cc` | n | clear workbench |
 | `<leader>gj` | n | jump trail |
