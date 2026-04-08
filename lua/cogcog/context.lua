@@ -159,6 +159,60 @@ end
 -- Backward-compatible alias while the rest of the plugin migrates.
 M.with_panel = M.with_workbench
 
+-- Tool definitions for workbench synthesis.
+function M.with_tools(input)
+  local tools = {
+    "read_file(path) — read a project file and return its contents",
+    "list_files(dir) — list files in a directory (default: .)",
+    "grep(pattern, path) — search for a regex pattern (default path: .)",
+    "run_command(cmd) — execute a shell command and return stdout+stderr",
+  }
+
+  -- discover .cogcog/tools/ scripts
+  local tools_dir = config.cogcog_dir .. "/tools"
+  if vim.fn.isdirectory(tools_dir) == 1 then
+    local files = vim.fn.globpath(tools_dir, "*", false, true)
+    for _, f in ipairs(files) do
+      local name = vim.fn.fnamemodify(f, ":t")
+      if not name:match("^%.") and not name:match("~$") then
+        local first_lines = vim.fn.readfile(f, "", 5)
+        local desc = ""
+        for _, line in ipairs(first_lines) do
+          if line:match("^#[^!]") then
+            desc = " — " .. line:gsub("^#%s*", "")
+            break
+          end
+        end
+        table.insert(tools, "tool:" .. name .. desc)
+      end
+    end
+  end
+
+  table.insert(input, "## Available tools")
+  table.insert(input, "")
+  table.insert(input, "To use a tool, output EXACTLY this format on its own line:")
+  table.insert(input, "<<<TOOL: tool_name(args)>>>")
+  table.insert(input, "")
+  table.insert(input, "Examples:")
+  table.insert(input, '<<<TOOL: read_file("src/auth.ts")>>>')
+  table.insert(input, '<<<TOOL: grep("TODO", "src/")>>>')
+  table.insert(input, '<<<TOOL: list_files("src/middleware")>>>')
+  table.insert(input, '<<<TOOL: run_command("make test")>>>')
+  table.insert(input, '<<<TOOL: tool:check-types.sh()>>>')
+  table.insert(input, "")
+  table.insert(input, "Rules:")
+  table.insert(input, "- Output at most ONE tool call per response")
+  table.insert(input, "- Place it at the END of your response, after any explanation")
+  table.insert(input, "- I will execute it (with approval) and call you again with the result")
+  table.insert(input, "- If you don't need a tool, just respond normally without any tool call")
+  table.insert(input, "")
+  for _, t in ipairs(tools) do
+    table.insert(input, "- " .. t)
+  end
+  table.insert(input, "")
+  return input
+end
+
 -- Soft context from what is visibly on screen right now.
 function M.with_visible(input)
   local seen = {}

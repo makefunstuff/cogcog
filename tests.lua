@@ -270,6 +270,33 @@ test("error notification uses correct level", function()
   assert_true(type(stream.cancel_all) == "function", "cancel_all should exist")
 end)
 
+test("with_tools includes builtins", function()
+  local c = require("cogcog.context")
+  local input = {}
+  c.with_tools(input)
+  local text = table.concat(input, "\n")
+  assert_true(text:find("read_file") ~= nil, "should list read_file")
+  assert_true(text:find("list_files") ~= nil, "should list list_files")
+  assert_true(text:find("grep") ~= nil, "should list grep")
+  assert_true(text:find("run_command") ~= nil, "should list run_command")
+  assert_true(text:find("<<<TOOL:") ~= nil, "should include format example")
+end)
+
+test("with_tools discovers .cogcog/tools/ scripts", function()
+  local c = require("cogcog.context")
+  local cfg = require("cogcog.config")
+  local tools_dir = cfg.cogcog_dir .. "/tools"
+  vim.fn.mkdir(tools_dir, "p")
+  vim.fn.writefile({ "#!/bin/bash", "# List recent commits", "git log --oneline -5" }, tools_dir .. "/recent.sh")
+  local input = {}
+  c.with_tools(input)
+  local text = table.concat(input, "\n")
+  assert_true(text:find("tool:recent.sh") ~= nil, "should discover recent.sh")
+  assert_true(text:find("List recent commits") ~= nil, "should parse description")
+  vim.fn.delete(tools_dir .. "/recent.sh")
+  vim.fn.delete(tools_dir, "d")
+end)
+
 -- Summary
 out("")
 out("--- Test Results ---")

@@ -266,6 +266,73 @@ end
 
 -- plan (C-g): workbench-driven synthesis
 
+local tool_mode = vim.g.cogcog_tool_mode or "ask"  -- "ask" | "read" | "trust"
+
+local builtin_tools = {
+  read_file = function(args)
+    local path = args:match('^"(.-)"') or args:match("^'(.-)'") or args
+    if not path or path == "" then return "error: no path given" end
+    local lines = vim.fn.readfile(path, "", 500)
+    if #lines == 0 and vim.fn.filereadable(path) == 0 then return "error: file not found: " .. path end
+    return table.concat(lines, "\n")
+  end,
+  list_files = function(args)
+    local dir = args:match('^"(.-)"') or args:match("^'(.-)'") or args
+    if not dir or dir == "" then dir = "." end
+    local out = vim.fn.systemlist("find " .. vim.fn.shellescape(dir) .. " -maxdepth 2 -not -path '*/.*' -type f 2>/dev/null | head -100 | sort")
+    return #out > 0 and table.concat(out, "\n") or "error: empty or not found: " .. dir
+  end,
+  grep = function(args)
+    local pattern, path = args:match('^"(.-)",%s*"(.-)"')
+    if not pattern then pattern = args:match('^"(.-)"') or args; path = "." end
+    if not path or path == "" then path = "." end
+    local out = vim.fn.systemlist("grep -rn " .. vim.fn.shellescape(pattern) .. " " .. vim.fn.shellescape(path) .. " 2>/dev/null | head -50")
+    return #out > 0 and table.concat(out, "\n") or "no matches"
+  end,
+  run_command = function(args)
+    local cmd = args:match('^"(.-)"') or args:match("^'(.-)'") or args
+    if not cmd or cmd == "" then return "error: no command given" end
+    local out = vim.fn.systemlist(cmd)
+    local code = vim.v.shell_error
+    local result = table.concat(out, "\n")
+    if code ~= 0 then result = result .. "\n(exit " .. code .. ")" end
+    return result
+  end,
+}
+
+local function is_read_only_tool(name)
+  return name == "read_file" or name == "list_files" or name == "grep"
+end
+
+local function execute_tool(name, args)
+  -- check builtins first
+  if builtin_tools[name] then return builtin_tools[name](args) end
+  -- check .cogcog/tools/
+  if name:match("^tool:") then
+    local script_name = name:gsub("^tool:", "")
+    local script_path = config.cogcog_dir .. "/tools/" .. script_name
+    if vim.fn.filereadable(script_path) == 1 then
+      local out = vim.fn.systemlist({ "bash", script_path })
+      local code = vim.v.shell_error
+      local result = table.concat(out, "\n")
+      if code ~= 0 then result = result .. "\n(exit " .. code .. ")" end
+      return result
+    end
+    return "error: tool not found: " .. script_name
+  end
+  return "error: unknown tool: " .. name
+end
+
+local function parse_tool_call(lines)
+  for i = #lines, 1, -1 do
+    local name, args = lines[i]:match("^<<<TOOL:%s*([%w_:%.%-]+)%((.*)%)>>>$")
+    if name then
+      return name, args, i
+    end
+  end
+  return nil
+end
+
 local function plan_send(question)
   local workbench = ctx.get_or_create_workbench()
   if question then
@@ -276,6 +343,7 @@ local function plan_send(question)
   local input = {}
   ctx.with_system(input)
   ctx.with_scope_contract(input)
+  ctx.with_tools(input)
   ctx.with_quickfix(input)
   ctx.with_workbench(input)
   ctx.with_visible(input)
@@ -283,8 +351,50 @@ local function plan_send(question)
   stream.to_buf(input, workbench, {
     raw = true,
     on_done = function()
-      if vim.api.nvim_buf_is_valid(workbench) then
+      if not vim.api.nvim_buf_is_valid(workbench) then return end
+      local all = vim.api.nvim_buf_get_lines(workbench, 0, -1, false)
+      local name, args, _line_idx = parse_tool_call(all)
+      if not name then
+        -- no tool call — normal completion
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
+        return
+      end
+
+      -- tool call detected
+      local mode = vim.g.cogcog_tool_mode or "ask"
+      local auto = (mode == "trust") or (mode == "read" and is_read_only_tool(name))
+
+      if auto then
+        local result = execute_tool(name, args)
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
+          "", "--- tool: " .. name .. " ---", ""
+        })
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
+        stream._scroll_buf(workbench)
+        -- continue: call plan_send again with updated workbench
+        plan_send(nil)
+      else
+        vim.ui.select({ "y — execute", "n — skip" }, {
+          prompt = "🔧 " .. name .. "(" .. args .. ")",
+        }, function(choice)
+          if not vim.api.nvim_buf_is_valid(workbench) then return end
+          if choice and choice:match("^y") then
+            local result = execute_tool(name, args)
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
+              "", "--- tool: " .. name .. " ---", ""
+            })
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
+            stream._scroll_buf(workbench)
+            plan_send(nil)
+          else
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
+              "", "--- tool: " .. name .. " (skipped) ---", "", "---", "", ""
+            })
+            stream._scroll_buf(workbench)
+          end
+        end)
       end
     end,
   })

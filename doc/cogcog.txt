@@ -60,6 +60,14 @@ PLANNING                                        *cogcog-plan*
 <C-g>           Fast workbench synthesis (raw API, 0.3s).
                 From code: prompts, shows current filename.
                 From workbench: sends the current workbench as-is.
+                The model can request tool calls during synthesis.
+                Each call appears in the workbench for approval.
+
+                                                *cogcog-tool-mode*
+                Set `vim.g.cogcog_tool_mode` to control approval:
+                  "ask"   (default) approve every tool call
+                  "read"  auto-approve read-only, ask for commands
+                  "trust" auto-approve all for this turn
 
                                                 *cogcog-cy*
 <leader>gy      (visual) Pin selection to workbench.

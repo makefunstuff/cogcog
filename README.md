@@ -55,14 +55,33 @@ Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a`
 <leader>gcip        review this paragraph
 ```
 
-### 5. Plan (workbench)
+### 5. Plan (workbench + tools)
 
 ```
 <leader>co                          open workbench
 <C-g> → "design the auth flow"     synthesize
-<C-g> → "use token bucket"         continue
-<leader>co                          close — back to stateless
 ```
+
+The model can request tools during workbench synthesis:
+
+```
+model: I need to see the current implementation
+  🔧 read_file("src/auth.ts") — y/n?
+y
+  --- tool: read_file ---
+  [file contents]
+  --- end ---
+model: Here's the refactored version...
+```
+
+Every tool call is visible in the workbench. You approve each one.
+Set `vim.g.cogcog_tool_mode` to control approval:
+
+| Mode | Behavior |
+|------|----------|
+| `"ask"` (default) | approve every tool call |
+| `"read"` | auto-approve read-only tools, ask for commands |
+| `"trust"` | auto-approve all for this turn |
 
 The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run commands with `<leader>g!`, run project tools with `<leader>ct`, edit freely with normal vim.
 
