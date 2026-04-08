@@ -512,6 +512,51 @@ vim.keymap.set("v", "<leader>gy", function()
   end)
 end, { desc = "cogcog: pin" })
 
+vim.keymap.set("n", "<leader>g!", function()
+  vim.ui.input({ prompt = "$ " }, function(cmd)
+    if not cmd or cmd == "" then return end
+    local workbench = ctx.get_or_create_workbench()
+    ctx.show_workbench()
+    vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- $ " .. cmd .. " ---", "" })
+    local job = vim.fn.jobstart({ "bash", "-c", cmd }, {
+      stdout_buffered = false,
+      on_stdout = function(_, data)
+        if not data then return end
+        vim.schedule(function()
+          if not vim.api.nvim_buf_is_valid(workbench) then return end
+          for _, line in ipairs(data) do
+            if line ~= "" then
+              vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { line })
+            end
+          end
+          stream._scroll_buf(workbench)
+        end)
+      end,
+      on_stderr = function(_, data)
+        if not data then return end
+        vim.schedule(function()
+          if not vim.api.nvim_buf_is_valid(workbench) then return end
+          for _, line in ipairs(data) do
+            if line ~= "" then
+              vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { line })
+            end
+          end
+          stream._scroll_buf(workbench)
+        end)
+      end,
+      on_exit = function(_, code)
+        vim.schedule(function()
+          if not vim.api.nvim_buf_is_valid(workbench) then return end
+          vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- exit " .. code .. " ---", "" })
+          stream._scroll_buf(workbench)
+          vim.notify(code == 0 and "✓ command done" or ("✗ exit " .. code), code == 0 and vim.log.levels.INFO or vim.log.levels.WARN)
+        end)
+      end,
+    })
+    if type(job) == "number" and job > 0 then stream.active_jobs[job] = true end
+  end)
+end, { desc = "cogcog: exec → workbench" })
+
 vim.keymap.set("n", "<leader>co", function()
   if ctx.workbench_win() then vim.api.nvim_win_close(ctx.workbench_win(), false) else ctx.show_workbench() end
 end, { desc = "cogcog: workbench" })

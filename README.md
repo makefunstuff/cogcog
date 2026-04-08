@@ -64,7 +64,7 @@ Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a`
 <leader>co                          close — back to stateless
 ```
 
-The workbench is a plain markdown buffer. Pin code with `<leader>gy`, import context with `:read !git diff`, edit freely with normal vim.
+The workbench is a plain markdown buffer. Pin code with `<leader>gy`, run commands with `<leader>g!`, import context with `:read !git diff`, edit freely with normal vim.
 
 ### 6. Batch (quickfix)
 
@@ -179,6 +179,7 @@ Requires: `bash`, `curl`, `jq`.
 | `<leader>gy` | v | pin to workbench |
 | `<leader>co` | n | toggle workbench |
 | `<leader>cc` | n | clear workbench |
+| `<leader>g!` | n | exec command → workbench |
 | `<leader>gj` | n | jump trail |
 | `<leader>g.` | n | review recent changes |
 | `<leader>gq` | n | summarize quickfix |
