@@ -351,10 +351,10 @@ local function do_discover(discovery_file, update)
     table.insert(input, "")
     table.insert(input, "UPDATE this discovery. Add new files, remove deleted ones, update descriptions.")
   else
-    table.insert(input, "Analyze this project. Output a structured reference organized by DOMAIN.")
+    table.insert(input, "Analyze this project based ONLY on the information above. Output a structured reference organized by DOMAIN.")
     table.insert(input, "Format: `path/to/file.ext` for vim gf navigation. Group by domain. Be concise.")
   end
-  table.insert(input, "You may READ files. Do NOT write or create files. Output only the document.")
+  table.insert(input, "Output ONLY the discovery document. No tool calls, no file reading, no preamble.")
 
   vim.fn.writefile({ "# Discovering project..." }, discovery_file)
   vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
