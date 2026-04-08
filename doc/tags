@@ -17,10 +17,13 @@ cogcog-ctrl-g	cogcog.txt	/*cogcog-ctrl-g*
 cogcog-cy	cogcog.txt	/*cogcog-cy*
 cogcog-fast-model	cogcog.txt	/*cogcog-fast-model*
 cogcog-g-dot	cogcog.txt	/*cogcog-g-dot*
+cogcog-gQ	cogcog.txt	/*cogcog-gQ*
+cogcog-gR	cogcog.txt	/*cogcog-gR*
 cogcog-ga	cogcog.txt	/*cogcog-ga*
 cogcog-gaa	cogcog.txt	/*cogcog-gaa*
 cogcog-gc	cogcog.txt	/*cogcog-gc*
 cogcog-gj	cogcog.txt	/*cogcog-gj*
+cogcog-gq	cogcog.txt	/*cogcog-gq*
 cogcog-gr	cogcog.txt	/*cogcog-gr*
 cogcog-gs	cogcog.txt	/*cogcog-gs*
 cogcog-gss	cogcog.txt	/*cogcog-gss*
@@ -41,4 +44,5 @@ cogcog-tutorial-refactor	cogcog-tutorial.txt	/*cogcog-tutorial-refactor*
 cogcog-tutorial-setup	cogcog-tutorial.txt	/*cogcog-tutorial-setup*
 cogcog-tutorial.txt	cogcog-tutorial.txt	/*cogcog-tutorial.txt*
 cogcog-verbs	cogcog.txt	/*cogcog-verbs*
+cogcog-workbench	cogcog.txt	/*cogcog-workbench*
 cogcog.txt	cogcog.txt	/*cogcog.txt*

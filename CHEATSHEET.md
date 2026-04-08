@@ -1,48 +1,52 @@
 # cogcog cheatsheet
 
-## Verbs (all 0.3s via raw API)
+## Verbs (all 0.3s via bundled raw transport)
 
-```
+```text
 gaip / gaa          explain (no prompt, instant)
 1gaip               one sentence
 3gaip               detailed
 Visual ga           ask with prompt
 gsip / gss          generate → code buffer
-<leader>grip        refactor in-place (u to undo)
+<leader>grip        refactor (small = inline, large = review buffer)
 ```
 
-## Slow verbs (cloud models)
+## Deeper / optional verbs
 
-```
-<leader>gcip        check (opus)
-<leader>gx          agent execute (cloud, in panel)
-<leader>cd          discover project (opus)
+```text
+<leader>gcip        check
+<leader>gx          optional external execute (in workbench)
+<leader>cd          discover project
 ```
 
 ## Context from vim state
 
-```
+```text
 <leader>gj          jump trail
 <leader>g.          recent changes
+<leader>gq          summarize quickfix
+<leader>gQ          review quickfix
+<leader>gR          review/apply quickfix rewrite
 ```
 
 `ga` auto-includes visible windows + quickfix.
 
-## Planning (fast, in panel)
+## Planning (fast, in workbench)
 
-```
-<C-g>               plan (0.3s, raw API)
-<C-g> (in panel)    send as-is
+```text
+<C-g>               plan / synthesize (0.3s, raw API)
+<C-g> (in workbench) send as-is
 ```
 
-## Context
+## Workbench
 
-```
+```text
 <leader>cy          pin selection
-<leader>co          toggle panel (open = ga stateful)
-<leader>cc          clear
+<leader>co          toggle workbench
+<leader>cc          clear workbench
 <leader>cp          improve prompt from bad response
 <C-c>               cancel
+a                   apply review buffer
 q                   close split
 ```
 
@@ -56,15 +60,15 @@ dap                         delete section
 
 ## Config
 
-```
-COGCOG_FAST_MODEL   ga/gs/<C-g>/<leader>gr: fast local model
-COGCOG_AGENT_CMD    <leader>gx: cloud agent with tools
-COGCOG_CHECKER      <leader>gc/<leader>cd: strongest model
+```text
+COGCOG_FAST_MODEL   ga/gs/<C-g>/<leader>gr: fast model for bundled transport
+COGCOG_AGENT_CMD    <leader>gx: optional external execute command
+COGCOG_CHECKER      <leader>gc/<leader>cd: optional stronger review/discovery command
 ```
 
 ## Combos
 
-```
+```text
 gaip                instant explain
 gaa                 explain entire buffer
 gd → gaip           definition → explain
@@ -72,5 +76,5 @@ gd → gaip           definition → explain
 <leader>gj          investigate jump trail
 <leader>g.          review changes
 gsip → <leader>gcip generate → verify
-<C-g> → <leader>gx  plan → execute
+<C-g> → <leader>gx  plan → optional execute
 ```

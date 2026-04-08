@@ -1,32 +1,56 @@
--- cogcog/context.lua — input builders and context panel
+-- cogcog/context.lua — input builders and workbench helpers
 local config = require("cogcog.config")
 local M = {}
 
--- Input builders: each takes an input table and returns it with added context
--- Usage: ctx.with_system(input) where input = {}
+local WORKBENCH_NAME = "[cogcog-workbench]"
 
--- Add system prompt if exists
+local function read_lines(path)
+  if path and vim.fn.filereadable(path) == 1 then return vim.fn.readfile(path) end
+  return {}
+end
+
+local function is_cogcog_buf(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return false end
+  return vim.api.nvim_buf_get_name(buf):match("%[cogcog") ~= nil
+end
+
+local function workbench_initial_lines()
+  return read_lines(config.readable_workbench_file())
+end
+
+-- Input builders -----------------------------------------------------------
+--
+-- Context model used by the current Cogcog pass:
+--   - hard scope: explicit operand / quickfix target set
+--   - explicit imports: workbench contents
+--   - soft context: visible windows
+
 function M.with_system(input)
   local sys = config.cogcog_dir .. "/system.md"
-  if vim.fn.filereadable(sys) == 1 then
-    local sys_lines = vim.fn.readfile(sys)
-    if #sys_lines > 0 then
-      vim.list_extend(input, sys_lines)
-      table.insert(input, "")
-    else
-      vim.notify("cogcog: system.md is empty", vim.log.levels.WARN)
-    end
+  local sys_lines = read_lines(sys)
+  if #sys_lines > 0 then
+    vim.list_extend(input, sys_lines)
+    table.insert(input, "")
   end
   return input
 end
 
--- Add quickfix list (LSP diagnostics, grep, make errors)
+function M.with_scope_contract(input)
+  table.insert(input, "Primary target: the explicit operand or quickfix target set.")
+  table.insert(input, "Quickfix, when present, is the hard boundary for batch work.")
+  table.insert(input, "Workbench content is explicitly imported context. Visible windows are soft context only.")
+  table.insert(input, "")
+  return input
+end
+
+-- Hard scope for batch work.
 function M.with_quickfix(input)
   local qf = vim.fn.getqflist()
   if #qf == 0 then return input end
+
   local out, seen = {}, {}
   for _, item in ipairs(qf) do
-    if item.bufnr > 0 and item.lnum > 0 then
+    if item.bufnr > 0 and item.lnum > 0 and vim.api.nvim_buf_is_valid(item.bufnr) then
       local key = item.bufnr .. ":" .. item.lnum
       if not seen[key] then
         seen[key] = true
@@ -36,17 +60,79 @@ function M.with_quickfix(input)
       end
     end
   end
+
   if #out > 0 then
     table.insert(input, "--- quickfix ---")
     vim.list_extend(input, out)
     table.insert(input, "")
-  else
-    vim.notify("cogcog: no quickfix items found", vim.log.levels.INFO)
   end
   return input
 end
 
--- Add selection (lines, source identifier)
+function M.get_quickfix_targets(context_radius)
+  context_radius = context_radius or 2
+  local qf = vim.fn.getqflist()
+  local per_buf = {}
+
+  for _, item in ipairs(qf) do
+    if item.bufnr > 0 and item.lnum > 0 and vim.api.nvim_buf_is_valid(item.bufnr) and vim.bo[item.bufnr].buftype == "" then
+      local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+      local file = M.relative_name(vim.api.nvim_buf_get_name(item.bufnr))
+      per_buf[item.bufnr] = per_buf[item.bufnr] or {}
+      table.insert(per_buf[item.bufnr], {
+        bufnr = item.bufnr,
+        file = file,
+        lnum = item.lnum,
+        text = item.text and vim.trim(item.text) or "(no message)",
+        start = math.max(1, item.lnum - context_radius),
+        stop = math.min(line_count, item.lnum + context_radius),
+      })
+    end
+  end
+
+  local targets = {}
+  for bufnr, entries in pairs(per_buf) do
+    table.sort(entries, function(a, b)
+      if a.start == b.start then return a.stop < b.stop end
+      return a.start < b.start
+    end)
+
+    local current = nil
+    for _, entry in ipairs(entries) do
+      if not current then
+        current = {
+          bufnr = bufnr,
+          file = entry.file,
+          start = entry.start,
+          stop = entry.stop,
+          hints = { { lnum = entry.lnum, text = entry.text } },
+        }
+      elseif entry.start <= current.stop + 1 then
+        current.stop = math.max(current.stop, entry.stop)
+        table.insert(current.hints, { lnum = entry.lnum, text = entry.text })
+      else
+        table.insert(targets, current)
+        current = {
+          bufnr = bufnr,
+          file = entry.file,
+          start = entry.start,
+          stop = entry.stop,
+          hints = { { lnum = entry.lnum, text = entry.text } },
+        }
+      end
+    end
+    if current then table.insert(targets, current) end
+  end
+
+  table.sort(targets, function(a, b)
+    if a.file == b.file then return a.start > b.start end
+    return a.file < b.file
+  end)
+
+  return targets
+end
+
+-- Hard scope for the current operand.
 function M.with_selection(input, lines, source)
   if lines and #lines > 0 then
     table.insert(input, "--- " .. source .. " ---")
@@ -57,13 +143,12 @@ function M.with_selection(input, lines, source)
   return input
 end
 
--- Add context panel if populated
-function M.with_panel(input)
-  local ctx = M.get_or_create_panel()
-  local lines = vim.api.nvim_buf_get_lines(ctx, 0, -1, false)
-  local content = table.concat(lines, "\n")
-  if vim.trim(content) ~= "" then
-    table.insert(input, "--- context ---")
+-- Explicit imports and longer-form working material.
+function M.with_workbench(input)
+  local buf = M.get_or_create_workbench()
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  if vim.trim(table.concat(lines, "\n")) ~= "" then
+    table.insert(input, "--- workbench ---")
     table.insert(input, "")
     vim.list_extend(input, lines)
     table.insert(input, "")
@@ -71,30 +156,27 @@ function M.with_panel(input)
   return input
 end
 
--- Add all visible windows (excluding cogcog buffers)
+-- Backward-compatible alias while the rest of the plugin migrates.
+M.with_panel = M.with_workbench
+
+-- Soft context from what is visibly on screen right now.
 function M.with_visible(input)
   local seen = {}
-  -- skip cogcog buffers
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog") then
-      seen[b] = true
-    end
-  end
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    local b = vim.api.nvim_win_get_buf(w)
-    if not seen[b] and vim.api.nvim_buf_is_valid(b) and vim.bo[b].buftype == "" then
-      seen[b] = true
-      local name = vim.api.nvim_buf_get_name(b)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if not seen[buf] and vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buftype == "" and not is_cogcog_buf(buf) then
+      seen[buf] = true
+      local name = vim.api.nvim_buf_get_name(buf)
       if name ~= "" then
-        local info = vim.fn.getwininfo(w)[1]
+        local info = vim.fn.getwininfo(win)[1]
         if info then
           local first = info.topline or 1
-          local last = info.botline or vim.api.nvim_buf_line_count(b)
-          local vis = vim.api.nvim_buf_get_lines(b, first - 1, last, false)
-          if #vis > 0 then
+          local last = info.botline or vim.api.nvim_buf_line_count(buf)
+          local lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
+          if #lines > 0 then
             table.insert(input, "--- " .. M.relative_name(name) .. ":" .. first .. "-" .. last .. " (visible) ---")
             table.insert(input, "")
-            vim.list_extend(input, vis)
+            vim.list_extend(input, lines)
             table.insert(input, "")
           end
         end
@@ -104,26 +186,25 @@ function M.with_visible(input)
   return input
 end
 
--- Add jump trail (last N locations visited via gv or <C-o>/<C-i>)
--- max_jumps = 5 (default, controls how many jump locations to include)
 function M.with_jumps(input, max_jumps)
   max_jumps = max_jumps or 5
   local jumps = vim.fn.getjumplist()[1]
   if not jumps or #jumps == 0 then return input end
+
   local seen, count = {}, 0
   for i = #jumps, 1, -1 do
     if count >= max_jumps then break end
-    local j = jumps[i]
-    if j.bufnr and vim.api.nvim_buf_is_valid(j.bufnr) and vim.bo[j.bufnr].buftype == "" then
-      local name = vim.api.nvim_buf_get_name(j.bufnr)
-      local key = name .. ":" .. j.lnum
+    local jump = jumps[i]
+    if jump.bufnr and vim.api.nvim_buf_is_valid(jump.bufnr) and vim.bo[jump.bufnr].buftype == "" then
+      local name = vim.api.nvim_buf_get_name(jump.bufnr)
+      local key = name .. ":" .. jump.lnum
       if name ~= "" and not seen[key] then
         seen[key] = true
-        local start = math.max(0, j.lnum - 3)
-        local stop = math.min(vim.api.nvim_buf_line_count(j.bufnr), j.lnum + 3)
-        local snippet = vim.api.nvim_buf_get_lines(j.bufnr, start, stop, false)
+        local start = math.max(0, jump.lnum - 3)
+        local stop = math.min(vim.api.nvim_buf_line_count(jump.bufnr), jump.lnum + 3)
+        local snippet = vim.api.nvim_buf_get_lines(jump.bufnr, start, stop, false)
         if #snippet > 0 then
-          table.insert(input, "--- " .. M.relative_name(name) .. ":" .. (start+1) .. "-" .. stop .. " (jump) ---")
+          table.insert(input, "--- " .. M.relative_name(name) .. ":" .. (start + 1) .. "-" .. stop .. " (jump) ---")
           table.insert(input, "")
           vim.list_extend(input, snippet)
           table.insert(input, "")
@@ -135,24 +216,24 @@ function M.with_jumps(input, max_jumps)
   return input
 end
 
--- Add recent changes (last 10 lines modified, showing ±2 context)
--- Shows what the user recently edited so LLM understands changes
 function M.with_changes(input)
   local changes = vim.fn.getchangelist()[1]
   if not changes or #changes == 0 then return input end
+
   local buf = vim.api.nvim_get_current_buf()
   local name = M.relative_name(vim.api.nvim_buf_get_name(buf))
   local seen, snippets = {}, {}
   for i = #changes, math.max(1, #changes - 10), -1 do
-    local c = changes[i]
-    if c.lnum and c.lnum > 0 and not seen[c.lnum] then
-      seen[c.lnum] = true
-      local start = math.max(0, c.lnum - 2)
-      local stop = math.min(vim.api.nvim_buf_line_count(buf), c.lnum + 2)
+    local change = changes[i]
+    if change.lnum and change.lnum > 0 and not seen[change.lnum] then
+      seen[change.lnum] = true
+      local start = math.max(0, change.lnum - 2)
+      local stop = math.min(vim.api.nvim_buf_line_count(buf), change.lnum + 2)
       vim.list_extend(snippets, vim.api.nvim_buf_get_lines(buf, start, stop, false))
       table.insert(snippets, "")
     end
   end
+
   if #snippets > 0 then
     table.insert(input, "--- recent changes in " .. name .. " ---")
     table.insert(input, "")
@@ -162,7 +243,6 @@ function M.with_changes(input)
   return input
 end
 
--- Add current file contents
 function M.with_current_file(input)
   local buf = vim.api.nvim_get_current_buf()
   local name = vim.api.nvim_buf_get_name(buf)
@@ -178,13 +258,13 @@ function M.with_current_file(input)
   return input
 end
 
--- Add list of open buffers
+-- Optional helper only. Do not use as a default context source.
 function M.with_open_buffers(input)
   local cur_name = vim.api.nvim_buf_get_name(0)
   local names = {}
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == "" then
-      local name = vim.api.nvim_buf_get_name(b)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buftype == "" then
+      local name = vim.api.nvim_buf_get_name(buf)
       if name ~= "" and name ~= cur_name then
         table.insert(names, M.relative_name(name))
       end
@@ -198,60 +278,102 @@ function M.with_open_buffers(input)
   return input
 end
 
--- Get or create the context panel buffer
-function M.get_or_create_panel()
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog%]$") then
-      return b
+-- Workbench ---------------------------------------------------------------
+
+function M.get_or_create_workbench()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == WORKBENCH_NAME then
+      return buf
     end
   end
+
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].buftype = "nofile"
-  vim.api.nvim_buf_set_name(buf, "[cogcog]")
-  local initial = vim.fn.filereadable(config.session_file) == 1
-    and vim.fn.readfile(config.session_file)
-    or (vim.fn.filereadable(config.cogcog_dir .. "/system.md") == 1
-      and vim.fn.readfile(config.cogcog_dir .. "/system.md") or {})
+  vim.api.nvim_buf_set_name(buf, WORKBENCH_NAME)
+
+  local initial = workbench_initial_lines()
   if #initial > 0 then vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial) end
   return buf
 end
 
--- Get the panel window if it exists
-function M.panel_win()
-  local buf = M.get_or_create_panel()
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(w) == buf then return w end
+function M.is_workbench(buf)
+  buf = buf or vim.api.nvim_get_current_buf()
+  return vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == WORKBENCH_NAME
+end
+
+function M.workbench_win()
+  local buf = M.get_or_create_workbench()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == buf then return win end
   end
 end
 
--- Show/create context panel and split
-function M.show_panel()
-  if M.panel_win() then return end
-  local buf = M.get_or_create_panel()
+function M.show_workbench()
+  if M.workbench_win() then return end
+  local buf = M.get_or_create_workbench()
   local width = math.floor(vim.o.columns * 0.4)
   vim.cmd("botright vsplit | vertical resize " .. width)
-  vim.api.nvim_win_set_buf(0, buf)
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
   for _, opt in ipairs({ "number", "relativenumber", "cursorline" }) do
-    vim.api.nvim_set_option_value(opt, false, { win = 0 })
+    vim.api.nvim_set_option_value(opt, false, { win = win })
   end
-  vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
-  vim.api.nvim_set_option_value("wrap", true, { win = 0 })
-  vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
-  vim.api.nvim_set_option_value("winfixwidth", true, { win = 0 })
-  vim.api.nvim_set_option_value("statusline", " cogcog", { win = 0 })
+  vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
+  vim.api.nvim_set_option_value("wrap", true, { win = win })
+  vim.api.nvim_set_option_value("linebreak", true, { win = win })
+  vim.api.nvim_set_option_value("winfixwidth", true, { win = win })
+  vim.api.nvim_set_option_value("statusline", " 🧠 workbench", { win = win })
+  return win
 end
 
--- Helpers
+-- Backward-compatible aliases while the rest of the plugin migrates.
+M.get_or_create_panel = M.get_or_create_workbench
+M.panel_win = M.workbench_win
+M.show_panel = M.show_workbench
 
--- Convert absolute path to relative (or return "scratch" for unnamed)
+-- Helpers -----------------------------------------------------------------
+
 function M.relative_name(path)
   if path == "" then return "scratch" end
   local cwd = vim.fn.getcwd() .. "/"
   return path:sub(1, #cwd) == cwd and path:sub(#cwd + 1) or path
 end
 
--- Create vertical or horizontal split with options
+function M.same_lines(a, b)
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i] ~= b[i] then return false end
+  end
+  return true
+end
+
+function M.unified_diff(a, b)
+  if M.same_lines(a, b) then return { "(no changes)" } end
+
+  local left = table.concat(a, "\n")
+  local right = table.concat(b, "\n")
+  if left ~= "" then left = left .. "\n" end
+  if right ~= "" then right = right .. "\n" end
+
+  local diff_fn = (vim.text and vim.text.diff) or vim.diff
+  if type(diff_fn) == "function" then
+    local ok, diff = pcall(diff_fn, left, right, { result_type = "unified" })
+    if ok and type(diff) == "string" and diff ~= "" then
+      diff = diff:gsub("\n+$", "")
+      return vim.split(diff, "\n", { plain = true })
+    end
+  end
+
+  local out = { "--- original ---", "" }
+  vim.list_extend(out, a)
+  table.insert(out, "")
+  table.insert(out, "--- rewritten ---")
+  table.insert(out, "")
+  vim.list_extend(out, b)
+  return out
+end
+
 function M.make_split(vertical, buf, statusline)
   if vertical then
     local width = math.floor(vim.o.columns * 0.4)
@@ -271,14 +393,12 @@ function M.make_split(vertical, buf, statusline)
   return win
 end
 
--- Get visual selection as lines, name, and line range
 function M.get_visual_selection()
   local name = M.relative_name(vim.api.nvim_buf_get_name(0))
   local l1, l2 = vim.fn.line("'<"), vim.fn.line("'>")
   return vim.api.nvim_buf_get_lines(0, l1 - 1, l2, false), name, l1, l2
 end
 
--- Escape visual mode, get selection, call callback
 function M.visual_then(fn)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
   vim.schedule(function()
@@ -287,12 +407,12 @@ function M.visual_then(fn)
   end)
 end
 
--- Add agent-specific instructions based on mode
 function M.with_agent_instructions(input, mode)
   local instructions = {
     "Read before you write. Understand existing code before changing it.",
     "Match the project's style, naming, and conventions.",
   }
+
   if mode == "gen" then
     vim.list_extend(instructions, {
       "Explore the relevant code first, then generate.",
@@ -311,11 +431,12 @@ function M.with_agent_instructions(input, mode)
       "Run tests after changes if possible.",
     })
   end
-  -- load project system prompt if exists
+
   local sys = config.cogcog_dir .. "/system.md"
   if vim.fn.filereadable(sys) == 1 then
     vim.list_extend(instructions, vim.fn.readfile(sys))
   end
+
   table.insert(input, "--- instructions ---")
   table.insert(input, "")
   vim.list_extend(input, instructions)
@@ -323,25 +444,27 @@ function M.with_agent_instructions(input, mode)
   return input
 end
 
--- Reuse a named buffer/split or create new one
 function M.reuse_or_split(name, statusline)
   local buf
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match(vim.pesc(name) .. "$") then
-      buf = b
+  for _, existing in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(existing) and vim.api.nvim_buf_get_name(existing):match(vim.pesc(name) .. "$") then
+      buf = existing
       break
     end
   end
+
   if not buf then
     buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].filetype = "markdown"
     vim.bo[buf].buftype = "nofile"
     vim.api.nvim_buf_set_name(buf, name)
   end
+
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+
   local win
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(w) == buf then win = w end
+  for _, existing in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(existing) == buf then win = existing end
   end
   if not win then
     win = M.make_split(true, buf, statusline)
@@ -351,7 +474,6 @@ function M.reuse_or_split(name, statusline)
   return buf, win
 end
 
--- Strip markdown code fences from output
 function M.strip_code_fences(result)
   while #result > 0 and vim.trim(result[1]) == "" do table.remove(result, 1) end
   while #result > 0 and vim.trim(result[#result]) == "" do table.remove(result) end
@@ -360,123 +482,6 @@ function M.strip_code_fences(result)
     if #result > 0 and result[#result]:match("^```") then table.remove(result) end
   end
   return result
-end
-
-function M.get_or_create_panel()
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b):match("%[cogcog%]$") then
-      return b
-    end
-  end
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].buftype = "nofile"
-  vim.api.nvim_buf_set_name(buf, "[cogcog]")
-  local initial = vim.fn.filereadable(config.session_file) == 1
-    and vim.fn.readfile(config.session_file)
-    or (vim.fn.filereadable(config.cogcog_dir .. "/system.md") == 1
-      and vim.fn.readfile(config.cogcog_dir .. "/system.md") or {})
-  if #initial > 0 then vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial) end
-  return buf
-end
-
-function M.panel_win()
-  local buf = M.get_or_create_panel()
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(w) == buf then return w end
-  end
-end
-
-function M.show_panel()
-  if M.panel_win() then return end
-  local buf = M.get_or_create_panel()
-  local width = math.floor(vim.o.columns * 0.4)
-  vim.cmd("botright vsplit | vertical resize " .. width)
-  vim.api.nvim_win_set_buf(0, buf)
-  for _, opt in ipairs({ "number", "relativenumber", "cursorline" }) do
-    vim.api.nvim_set_option_value(opt, false, { win = 0 })
-  end
-  vim.api.nvim_set_option_value("signcolumn", "no", { win = 0 })
-  vim.api.nvim_set_option_value("wrap", true, { win = 0 })
-  vim.api.nvim_set_option_value("linebreak", true, { win = 0 })
-  vim.api.nvim_set_option_value("winfixwidth", true, { win = 0 })
-  vim.api.nvim_set_option_value("statusline", " cogcog", { win = 0 })
-end
-
--- helpers
-
-function M.relative_name(path)
-  if path == "" then return "scratch" end
-  local cwd = vim.fn.getcwd() .. "/"
-  return path:sub(1, #cwd) == cwd and path:sub(#cwd + 1) or path
-end
-
-function M.make_split(vertical, buf, statusline)
-  if vertical then
-    local width = math.floor(vim.o.columns * 0.4)
-    vim.cmd("botright vsplit | vertical resize " .. width)
-  else
-    vim.cmd("botright " .. math.max(10, math.floor(vim.o.lines * 0.4)) .. "split")
-  end
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
-  vim.api.nvim_set_option_value("number", false, { win = win })
-  vim.api.nvim_set_option_value("signcolumn", "no", { win = win })
-  vim.api.nvim_set_option_value("wrap", true, { win = win })
-  vim.api.nvim_set_option_value("linebreak", true, { win = win })
-  vim.api.nvim_set_option_value("statusline", statusline, { win = win })
-  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buf })
-  vim.cmd("wincmd p")
-  return win
-end
-
-function M.get_visual_selection()
-  local name = M.relative_name(vim.api.nvim_buf_get_name(0))
-  local l1, l2 = vim.fn.line("'<"), vim.fn.line("'>")
-  return vim.api.nvim_buf_get_lines(0, l1 - 1, l2, false), name, l1, l2
-end
-
-function M.visual_then(fn)
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
-  vim.schedule(function()
-    local lines, name, l1, l2 = M.get_visual_selection()
-    fn(lines, name .. ":" .. l1 .. "-" .. l2)
-  end)
-end
-
-function M.with_agent_instructions(input, mode)
-  local instructions = {
-    "Read before you write. Understand existing code before changing it.",
-    "Match the project's style, naming, and conventions.",
-  }
-  if mode == "gen" then
-    vim.list_extend(instructions, {
-      "Explore the relevant code first, then generate.",
-      "Output the final code to stdout.",
-    })
-  elseif mode == "plan" then
-    vim.list_extend(instructions, {
-      "Explore the codebase before answering.",
-      "Reference specific file paths and line numbers.",
-      "Be concrete — suggest exact changes, not vague advice.",
-    })
-  elseif mode == "exec" then
-    vim.list_extend(instructions, {
-      "Read files before making changes.",
-      "Prefer editing existing code over creating new files.",
-      "Run tests after changes if possible.",
-    })
-  end
-  -- load project system prompt if exists
-  local sys = config.cogcog_dir .. "/system.md"
-  if vim.fn.filereadable(sys) == 1 then
-    vim.list_extend(instructions, vim.fn.readfile(sys))
-  end
-  table.insert(input, "--- instructions ---")
-  table.insert(input, "")
-  vim.list_extend(input, instructions)
-  table.insert(input, "")
-  return input
 end
 
 return M

@@ -3,19 +3,19 @@
 INTRODUCTION                                    *cogcog*
 
 cogcog adds LLM verbs to vim. They compose with motions and text
-objects. Most verbs run at 0.3s via raw API. Check and execute
-use cloud models for depth.
+objects. Most verbs run at 0.3s via the bundled raw transport.
+External checker/execute commands are optional.
 
 Note: `ga` overrides show-ASCII, `gs` overrides sleep,
 `<C-g>` overrides show-file-info.
 
-FAST VERBS (raw API, 0.3s)                      *cogcog-verbs*
+FAST VERBS                                      *cogcog-verbs*
 
                                                 *cogcog-ga*
 ga{motion}      Explain code. No prompt. Count = verbosity:
                   gaip = concise, 1gaip = 1 sentence, 3gaip = detailed
                 Auto-includes visible windows and quickfix.
-                Panel open = stateful. Closed = stateless.
+                Workbench open = continues there. Closed = stateless.
                 Visual: prompted.
 
                                                 *cogcog-gaa*
@@ -23,6 +23,7 @@ gaa             Explain entire buffer.
 
                                                 *cogcog-gs*
 gs{motion}      Generate code. Raw API (fast). Output in code buffer.
+                Includes workbench content when present.
                 Auto-detects language, strips fences. :w to save.
 
                                                 *cogcog-gss*
@@ -30,33 +31,38 @@ gss             Generate from entire buffer.
 
                                                 *cogcog-gr*
 <leader>gr{motion}
-                Refactor in-place. u to undo.
+                Refactor in-place. Small rewrites apply directly
+                (u to undo). Larger rewrites open a review buffer
+                with a unified diff. Press 'a' to apply.
 
-CLOUD VERBS                                     *cogcog-cloud*
+DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check with strongest model (opus). 10-90s.
-                Split reused.
+                Check code. By default uses the bundled cogcog
+                transport. Set COGCOG_CHECKER to use a different
+                command. Split reused.
 
                                                 *cogcog-gx*
-<leader>gx      Agent execute. Cloud agent with tools. Runs in
-                the context panel. Stderr shows inline as progress.
-                Uses COGCOG_AGENT_CMD.
+<leader>gx      Optional external execute. Runs in the workbench.
+                Uses visible state, quickfix, and workbench
+                contents as prompt anchors. Stderr shows inline as
+                progress. Disabled unless COGCOG_AGENT_CMD is set.
 
                                                 *cogcog-cd*
-<leader>cd      Discover project. Strongest model.
-                Saved to .cogcog/discovery.md (gf-navigable).
+<leader>cd      Discover project. Writes .cogcog/discovery.md
+                (gf-navigable). By default uses the bundled cogcog
+                transport. Set COGCOG_CHECKER to override.
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
-<C-g>           Fast conversation (raw API, 0.3s).
+<C-g>           Fast workbench synthesis (raw API, 0.3s).
                 From code: prompts, shows current filename.
-                From panel: sends as-is.
+                From workbench: sends the current workbench as-is.
 
                                                 *cogcog-cy*
-<leader>cy      (visual) Pin selection to context panel.
+<leader>cy      (visual) Pin selection to workbench.
 
 VIM STATE AS CONTEXT                            *cogcog-context*
 
@@ -66,19 +72,39 @@ VIM STATE AS CONTEXT                            *cogcog-context*
                                                 *cogcog-g-dot*
 <leader>g.      Recent changes. Reuses ask split.
 
+                                                *cogcog-gq*
+<leader>gq      Summarize the current quickfix target set.
+
+                                                *cogcog-gQ*
+<leader>gQ      Review and prioritize the current quickfix target set.
+
+                                                *cogcog-gR*
+<leader>gR      Prepare rewrites for the current quickfix target set.
+                Opens a review buffer with diffs. Press 'a' to apply
+                all prepared rewrites. Targets that changed since
+                review are skipped.
+
 ga auto-includes visible windows and quickfix.
 
-PANEL                                           *cogcog-panel*
+Scope model:
+    hard scope      explicit operand or quickfix target set
+    explicit import workbench contents and pinned snippets
+    soft context    visible windows for grounding only
+
+Quickfix is the deliberate batch boundary when present.
+Visible windows help grounding, but should not replace explicit scope.
+
+WORKBENCH                                       *cogcog-workbench* *cogcog-panel*
 
                                                 *cogcog-co*
-<leader>co      Toggle. Open = ga stateful.
+<leader>co      Toggle workbench. Open = ga can continue there.
 >
                 :read .cogcog/review.md     add skill
                 :read !git diff             add tool output
                 dap                         delete section
 <
                                                 *cogcog-cc*
-<leader>cc      Clear, reload system prompt.
+<leader>cc      Clear workbench and persisted workbench file.
 
                                                 *cogcog-cp*
 <leader>cp      Improve prompt from bad response.
@@ -88,18 +114,24 @@ PANEL                                           *cogcog-panel*
 
 CONFIGURATION                                   *cogcog-config*
 
-    ga/gs/gr/<C-g>  COGCOG_FAST_MODEL (raw API, fast)
-    gx              COGCOG_AGENT_CMD (cloud agent with tools)
-    gc/discover     COGCOG_CHECKER (strongest model)
+Default behavior:
+    ga/gs/gr/<C-g>/gc/cd use the bundled cogcog command.
+    No external harness is required for the core loop.
+
+Optional overrides:
+    gx              COGCOG_AGENT_CMD (explicit external execute command)
+    gc/discover     COGCOG_CHECKER (explicit stronger review/discovery command)
 
                                                 *cogcog-fast-model*
-COGCOG_FAST_MODEL   Fast local model for most verbs.
+COGCOG_FAST_MODEL   Fast model for most verbs via the bundled cogcog command.
 
                                                 *cogcog-agent-cmd*
-COGCOG_AGENT_CMD    Cloud agent for execute.
+COGCOG_AGENT_CMD    Optional external execute command for <leader>gx.
+                When unset, <leader>gx is disabled and warns.
 
                                                 *cogcog-checker*
-COGCOG_CHECKER      Strongest model for check/discover.
+COGCOG_CHECKER      Optional stronger command for check/discover.
+                When unset, check/discover fall back to cogcog --raw.
 
                                                 *cogcog-backend*
 COGCOG_BACKEND      "anthropic" or "openai" (default: anthropic)
@@ -119,7 +151,7 @@ COGCOG_MAX_TOKENS   Max tokens (default 8192).
 PROJECT FILES                                   *cogcog-project*
 
 .cogcog/system.md       System prompt. Shared by all verbs.
-.cogcog/session.md      Auto-saved/restored.
+.cogcog/workbench.md    Auto-saved/restored workbench.
 .cogcog/discovery.md    Project map.
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
@@ -129,21 +161,25 @@ Fast (0.3s): >
     Visual ga       ask
     gsip / gss      generate
     <leader>grip    refactor
-    <C-g>           plan
+    <C-g>           plan / synthesize
     <leader>gj      jumps
     <leader>g.      changes
+    <leader>gq      quickfix summary
+    <leader>gQ      quickfix review
+    <leader>gR      quickfix rewrite
 <
-Cloud: >
-    <leader>gcip    check (opus)
-    <leader>gx      execute (agent)
-    <leader>cd      discover (opus)
+Optional: >
+    <leader>gcip    check
+    <leader>gx      external execute
+    <leader>cd      discover
 <
 Other: >
     <leader>cy      pin
-    <leader>co      panel
+    <leader>co      workbench
     <leader>cp      improve prompt
     <leader>cc      clear
     <C-c>           cancel
+    a               apply review buffer
     q               close split
 <
 

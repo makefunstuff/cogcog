@@ -1,10 +1,30 @@
 #!/usr/bin/env lua
 -- cogcog/tests.lua — Unit tests for context builders and stream logic
--- Run in Neovim: :lua require("cogcog.tests").run()
+-- Run in Neovim: :luafile tests.lua
 
 -- Minimal test framework
-local test_results = { passed = 0, failed = 0 }
+local test_results = { passed = 0, failed = 0, failures = {} }
 local current_test = nil
+
+local function out(line)
+  if vim and vim.api then
+    vim.api.nvim_out_write(line .. "\n")
+  else
+    print(line)
+  end
+end
+
+local function finish(code)
+  if vim and vim.cmd then
+    if code == 0 then
+      vim.cmd("qall!")
+    else
+      vim.cmd("cquit " .. code)
+    end
+  else
+    os.exit(code)
+  end
+end
 
 -- Test runner
 function test(name, fn)
@@ -12,10 +32,11 @@ function test(name, fn)
   local success, err = pcall(fn)
   if success then
     test_results.passed = test_results.passed + 1
-    io.stdout.write("✓ " .. name .. "\n")
+    out("✓ " .. name)
   else
     test_results.failed = test_results.failed + 1
-    io.stderr:write("✗ " .. name .. ": " .. tostring(err) .. "\n")
+    table.insert(test_results.failures, { name = name, err = tostring(err) })
+    out("✗ " .. name .. ": " .. tostring(err))
   end
 end
 
@@ -103,6 +124,21 @@ test("relative_name handles absolute paths", function()
   assert_true(#result > 0, "result should not be empty")
 end)
 
+test("same_lines detects equal content", function()
+  assert_true(require("cogcog.context").same_lines({ "a", "b" }, { "a", "b" }))
+end)
+
+test("same_lines detects changed content", function()
+  assert_true(not require("cogcog.context").same_lines({ "a", "b" }, { "a", "c" }))
+end)
+
+test("unified_diff shows changed lines", function()
+  local diff = require("cogcog.context").unified_diff({ "old" }, { "new", "next" })
+  assert_contains(diff, "-old")
+  assert_contains(diff, "+new")
+  assert_contains(diff, "+next")
+end)
+
 -- Test with_selection
 test("with_selection adds section", function()
   local input = {}
@@ -120,6 +156,13 @@ test("with_selection handles empty lines", function()
 end)
 
 -- Test with_agent_instructions
+test("with_scope_contract documents scope buckets", function()
+  local input = {}
+  require("cogcog.context").with_scope_contract(input)
+  assert_contains(input, "Primary target: the explicit operand or quickfix target set.")
+  assert_contains(input, "Workbench content is explicitly imported context. Visible windows are soft context only.")
+end)
+
 test("with_agent_instructions adds base instructions", function()
   local input = {}
   require("cogcog.context").with_agent_instructions(input, "gen")
@@ -130,32 +173,85 @@ end)
 test("with_agent_instructions gen mode adds gen-specific", function()
   local input = {}
   require("cogcog.context").with_agent_instructions(input, "gen")
-  assert_contains(input, "Explore the relevant code first")
+  assert_contains(input, "Explore the relevant code first, then generate.")
 end)
 
 test("with_agent_instructions plan mode adds plan-specific", function()
   local input = {}
   require("cogcog.context").with_agent_instructions(input, "plan")
-  assert_contains(input, "Be concrete")
+  assert_contains(input, "Be concrete — suggest exact changes, not vague advice.")
 end)
 
 test("with_agent_instructions exec mode adds exec-specific", function()
   local input = {}
   require("cogcog.context").with_agent_instructions(input, "exec")
-  assert_contains(input, "Read files before making changes")
+  assert_contains(input, "Read files before making changes.")
 end)
 
 -- Test config
-test("config.default_timeout exists", function()
+test("config exposes workbench paths", function()
   local config = require("cogcog.config")
-  assert_true(config.default_timeout ~= nil, "timeout should be set")
+  assert_true(config.workbench_file ~= nil, "workbench_file should be set")
+  assert_true(config.legacy_session_file ~= nil, "legacy_session_file should be set")
+end)
+
+test("config resolves bundled cogcog binary when available", function()
+  local config = require("cogcog.config")
+  assert_true(type(config.cogcog_bin) == "string" and config.cogcog_bin ~= "", "cogcog_bin should be a non-empty string")
+  if config.cogcog_bin ~= "cogcog" then
+    assert_true(vim.fn.filereadable(config.cogcog_bin) == 1, "resolved cogcog_bin should exist")
+  end
+end)
+
+test("checker_cmd falls back to bundled raw path", function()
+  local config = require("cogcog.config")
+  local old = vim.env.COGCOG_CHECKER
+  vim.env.COGCOG_CHECKER = nil
+  assert_equal(config.checker_cmd(), config.cogcog_bin .. " --raw")
+  vim.env.COGCOG_CHECKER = old
+end)
+
+test("agent_cmd is optional", function()
+  local config = require("cogcog.config")
+  local old = vim.env.COGCOG_AGENT_CMD
+  vim.env.COGCOG_AGENT_CMD = nil
+  assert_equal(config.agent_cmd(), nil)
+  vim.env.COGCOG_AGENT_CMD = old
 end)
 
 -- Test with_quickfix
 test("with_quickfix handles empty quickfix", function()
+  vim.fn.setqflist({})
   local input = {}
   require("cogcog.context").with_quickfix(input)
-  -- Should return input unchanged
+  assert_true(#input == 0, "empty quickfix should not add context")
+end)
+
+test("get_quickfix_targets merges nearby entries", function()
+  local buf = vim.api.nvim_create_buf(false, false)
+  vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/quickfix-target-test.lua")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+    "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10",
+  })
+  vim.fn.setqflist({
+    { bufnr = buf, lnum = 3, text = "first" },
+    { bufnr = buf, lnum = 4, text = "second" },
+    { bufnr = buf, lnum = 9, text = "third" },
+  })
+  local targets = require("cogcog.context").get_quickfix_targets(1)
+  assert_equal(#targets, 2, "nearby quickfix entries should merge")
+  assert_equal(targets[1].start, 8)
+  assert_equal(targets[1].stop, 10)
+  assert_equal(#targets[1].hints, 1)
+  assert_equal(targets[2].start, 2)
+  assert_equal(targets[2].stop, 5)
+  assert_equal(#targets[2].hints, 2)
+end)
+
+test("get_quickfix_targets ignores empty quickfix", function()
+  vim.fn.setqflist({})
+  local targets = require("cogcog.context").get_quickfix_targets(1)
+  assert_equal(#targets, 0)
 end)
 
 -- Test M.to_buf structure (can't fully test without actual backend)
@@ -175,19 +271,20 @@ test("error notification uses correct level", function()
 end)
 
 -- Summary
-print("\n--- Test Results ---")
-print("Passed: " .. test_results.passed)
-print("Failed: " .. test_results.failed)
+out("")
+out("--- Test Results ---")
+out("Passed: " .. test_results.passed)
+out("Failed: " .. test_results.failed)
 
 if test_results.failed > 0 then
-  print("\nFailed tests:")
-  for name, result in pairs(test_results) do
-    if not result then
-      print("  " .. name)
-    end
+  out("")
+  out("Failed tests:")
+  for _, failure in ipairs(test_results.failures) do
+    out("  " .. failure.name .. ": " .. failure.err)
   end
-  os.exit(1)
+  finish(1)
 else
-  print("\nAll tests passed!")
-  os.exit(0)
+  out("")
+  out("All tests passed!")
+  finish(0)
 end

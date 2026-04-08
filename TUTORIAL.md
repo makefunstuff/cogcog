@@ -11,7 +11,7 @@ Neovim: `{ dir = "/path/to/cogcog" }`
 
 ## 1. Explain code (instant, no prompt)
 
-```
+```text
 gaip             explain this paragraph
 gaf              explain this function
 gaa              explain entire buffer
@@ -22,17 +22,17 @@ gaa              explain entire buffer
 
 ## 2. Ask a question
 
-```
+```text
 Visual select → ga → "is this thread-safe?"
 ```
 
-## 3. Stateful exploration
+## 3. Open the workbench when you need persistent context
 
-```
-<leader>co       open panel — ga becomes stateful
-gaip             first question
-gaip             builds on previous
-<leader>co       close → back to stateless
+```text
+<leader>co       open workbench
+gaip             ask with the workbench in play
+<C-g>            continue from the workbench
+<leader>co       close → back to stateless operator flow
 ```
 
 ## 4. Pin from multiple files
@@ -43,67 +43,80 @@ gaip             builds on previous
 <C-g> → "can these race?"
 ```
 
-## 5. Plan
+## 5. Plan / synthesize
 
-```
-<C-g> → "add rate limiting"      fast conversation in panel
+```text
+<C-g> → "add rate limiting"      fast workbench synthesis
 <C-g> → "use token bucket"
 ```
 
 ## 6. Generate code
 
-```
+```text
 gsaf → "implement rate limiting"   fast (0.3s), code buffer
-gss → "scaffold module"           entire buffer
+gss → "scaffold module"            entire buffer
 :w src/ratelimit.ts
 ```
 
 ## 7. Refactor in-place
 
-```
-<leader>graf → "simplify"         replaces code, u to undo
-```
-
-## 8. Check
-
-```
-<leader>gcaf                      opus reviews (10-90s)
+```text
+<leader>graf → "simplify"         small rewrite = inline, large rewrite = review buffer
 ```
 
-## 9. Agent execute
+Press `a` to apply from the review buffer. `u` still undoes inline applies.
 
-```
-<leader>gx → "refactor auth"     cloud agent, in context panel
+## 8. Quickfix batch work
+
+```vim
+:grep "TODO" src/**
+<leader>gQ                        review the target set
+<leader>gR                        prepare rewrites → review buffer → a to apply
 ```
 
-Has tools (read/write/edit/bash). Activity shows inline.
+## 9. Check
+
+```text
+<leader>gcaf                      review this function
+```
+
+By default this uses the bundled Cogcog transport.
+Set `COGCOG_CHECKER` only if you want a different checker command.
 
 ## 10. Discover project
 
-```
-<leader>cd                        opus maps project, gf-navigable
+```text
+<leader>cd                        write a navigable discovery note
 ```
 
-## 11. Investigate
+## 11. Optional external execute
 
+```text
+<leader>gx → "refactor auth"     explicit external execute, anchored by workbench + visible state
 ```
+
+This is disabled unless `COGCOG_AGENT_CMD` is set.
+
+## 12. Investigate
+
+```text
 gd → gd → gd       navigate
-<leader>gj          how do these connect?
-<leader>g.          any bugs in my changes?
+<leader>gj         how do these connect?
+<leader>g.         any bugs in my changes?
 ```
 
-## 12. Iterate
+## 13. Iterate
 
 ```vim
-:make               errors → quickfix
-gaip                explain (quickfix auto-included)
+:make               " errors → quickfix
+gaip                " explain (quickfix auto-included)
 gsaf → "fix it"
 :make
-<leader>gcaf        verify
+<leader>gcaf        " verify
 ```
 
-## 13. Improve prompts
+## 14. Improve prompts
 
-```
+```text
 <leader>cp → "too generic"       appends fix to .cogcog/system.md
 ```

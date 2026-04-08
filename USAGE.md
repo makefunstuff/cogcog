@@ -4,7 +4,7 @@
 
 ### Instant explain
 
-```
+```text
 gaip             what does this paragraph do?
 gaf              what does this function do?
 gaa              walk me through this entire file
@@ -16,14 +16,14 @@ No prompt. Includes visible windows + quickfix automatically.
 
 ### Ask with a question
 
-```
+```text
 Visual select → ga → "is this thread-safe?"
 Visual select → ga → "what happens on nil input?"
 ```
 
 ### Generate code
 
-```
+```text
 gsaf → "add error handling"
 gsip → "implement this TODO"
 gss → "scaffold the module"
@@ -33,60 +33,66 @@ gss → "scaffold the module"
 
 ### Refactor in-place
 
-```
+```text
 <leader>graf → "simplify"
 <leader>grip → "convert to async/await"
 Visual <leader>gr → "add type annotations"
 ```
 
-Replaces code directly. `u` to undo.
+Small rewrites apply directly. `u` to undo.
+Larger rewrites open a review buffer with a unified diff. Press `a` to apply or `q` to close.
 
-### Plan
+### Plan / synthesize in the workbench
 
-```
+```text
 <C-g> → "add rate limiting to the API"
 <C-g> → "use token bucket, not sliding window"
 ```
 
-Fast conversation in the context panel. Shows current filename in prompt.
+Fast workbench synthesis. Shows current filename in the prompt when invoked from code.
 
-## Cloud verbs (10-90s)
+## Deeper / optional verbs
 
-### Deep check
+### Check
 
+```text
+<leader>gcaf        review this function
+<leader>gcip        review this paragraph
 ```
-<leader>gcaf        opus reviews this function
-<leader>gcip        opus reviews this paragraph
-```
 
-### Agent execute
+By default this uses the bundled Cogcog transport.
+Set `COGCOG_CHECKER` only if you explicitly want a different command for deeper review.
 
-```
+### Optional external execute
+
+```text
 <leader>gx → "refactor auth across all files"
 <leader>gx → "add tests for the parser module"
 ```
 
-Cloud agent with tools (read/write/edit/bash). Activity shows in the context panel. Follow up with `<C-g>`.
+`<leader>gx` is disabled unless `COGCOG_AGENT_CMD` is set.
+When configured, activity shows in the workbench. Prompt anchors come from visible windows, quickfix, and the workbench.
 
 ### Discover project
 
-```
+```text
 <leader>cd
 ```
 
-Opus maps your project by domain. `gf` on paths to navigate.
+Discovery writes a project note you can navigate with `gf`.
+By default it uses the bundled Cogcog transport. Set `COGCOG_CHECKER` if you want a different review/discovery command.
 
 ## Context from vim state
 
 ### Your screen is context
 
-`ga` auto-includes code from ALL visible windows. Split auth.ts and middleware.ts side by side → `gaip` in auth.ts sees both files.
+`ga` auto-includes code from visible windows. Split `auth.ts` and `middleware.ts` side by side → `gaip` in `auth.ts` sees both files.
 
 ### Jump trail
 
 Navigate around with `gd`, `gr`, `<C-o>`:
 
-```
+```text
 <leader>gj          how do these locations connect?
 ```
 
@@ -94,39 +100,56 @@ Navigate around with `gd`, `gr`, `<C-o>`:
 
 Edit some code, then:
 
-```
+```text
 <leader>g.          any bugs in my changes?
 ```
 
 ### Quickfix
 
 ```vim
-:make               errors → quickfix
-gaip                explain failure (quickfix auto-included)
+:make               " errors → quickfix
+gaip                " explain failure (quickfix auto-included)
 ```
 
 ```vim
-:lua vim.diagnostic.setqflist()     LSP diagnostics
-gaip                                explain
+:lua vim.diagnostic.setqflist()     " LSP diagnostics
+gaip                                " explain
 ```
 
 ```vim
 :grep "TODO" src/**
-<C-g> → "summarize what needs doing"
+<leader>gq                          " summarize what is in quickfix
+<leader>gQ                          " review and prioritize quickfix items
 ```
 
-## Stateful exploration
+## Scope model
 
-Open the panel → `ga` becomes a conversation:
+Cogcog distinguishes between three kinds of context:
 
+- **hard scope** — the explicit operand or target set
+- **explicit imports** — workbench contents, pinned snippets, command output you added
+- **soft context** — visible windows for grounding
+
+This keeps the common path bounded and predictable.
+
+## Workbench flow
+
+Open the workbench when you want a persistent editable scratchpad:
+
+```text
+<leader>co                open workbench
+gaip                      explain with the workbench in play
+<C-g>                     continue using the current workbench
+<leader>co                close → back to stateless operator flow
 ```
-<leader>co                open panel
-gaip                      first question
-gaip                      builds on previous answer
-<leader>co                close → back to stateless
+
+Save a note manually if you want:
+
+```vim
+:w .cogcog/investigation.md
 ```
 
-Save a session: `:w .cogcog/investigation.md`
+Pinned snippets, pasted docs, command output, and model responses can all live in the same workbench.
 
 ## Pin from multiple files
 
@@ -138,24 +161,36 @@ Save a session: `:w .cogcog/investigation.md`
 
 ## Generate → check loop
 
-```
+```text
 gsaf → "implement retry with backoff"      generate (0.3s)
 :w src/retry.ts                             save
 :make                                       test
 gaip                                        explain errors
-gsaf → "fix it"                             iterate
-<leader>gcaf                                verify with opus
+gsaf → "fix it"                            iterate
+<leader>gcaf                                verify with check
 ```
+
+## Quickfix rewrite flow
+
+Build a deliberate target set first, then prepare rewrites only for those targets:
+
+```vim
+:grep "TODO" src/**
+<leader>gR
+```
+
+Cogcog prepares merged quickfix target snippets in descending order per file, opens a review buffer with diffs, and applies only when you press `a`.
+The active quickfix list remains your navigation surface.
 
 ## Multi-file agent work
 
-```
+```text
 <leader>gx → "add input validation to all handlers"
 ```
 
-Agent reads files, makes changes. Activity streams in the panel:
+Agent reads files, makes changes, and streams progress in the workbench:
 
-```
+```text
   → Read src/routes/users.ts
   → Edit src/routes/users.ts
   → Read src/routes/orders.ts
@@ -165,7 +200,7 @@ Done. 2 files modified.
 
 Follow up:
 
-```
+```text
 <C-g> → "also add to the admin routes"
 ```
 
@@ -173,7 +208,7 @@ Follow up:
 
 Bad response:
 
-```
+```text
 <leader>cp → "it gave generic advice instead of reading the code"
 ```
 
@@ -182,13 +217,13 @@ Appends to `.cogcog/system.md`. Prompts improve per-project.
 ## Context management (native vim)
 
 ```vim
-<leader>co                          open panel
-:read .cogcog/review.md             add review skill
-:read !git diff --staged            add staged changes
-:read !tree -L 3                    project structure
-:read !grep -rn "auth" src/         search results
-dap                                 delete a section
-:w .cogcog/session.md               save manually
+<leader>co                          " open workbench
+:read .cogcog/review.md             " add review skill
+:read !git diff --staged            " add staged changes
+:read !tree -L 3                    " project structure
+:read !grep -rn "auth" src/         " search results
+dap                                 " delete a section
+:w .cogcog/workbench.md             " save manually if you want
 ```
 
 ## Shell
@@ -201,7 +236,7 @@ cat src/main.ts | cogcog --raw "any bugs?"
 
 ## Combos
 
-```
+```text
 gaip                        instant explain
 gaa                         explain entire file
 gd → gaip                   definition → explain
@@ -215,7 +250,7 @@ gsip → <leader>gcip         generate → verify
 
 ## Discovery workflow
 
-```
+```text
 <leader>cd                          map the project
 ```
 
@@ -232,12 +267,12 @@ Output:
 
 Navigate: cursor on path → `gf` → you're in the file.
 
-Pin a domain into context:
+Pin a domain into the workbench:
 
-```
+```text
 /### Auth                           jump to auth section
 V/### Database                      select the auth domain
-<leader>cy                          pin to context
+<leader>cy                          pin to workbench
 <C-g> → "simplify the token refresh"
 ```
 
@@ -245,7 +280,7 @@ V/### Database                      select the auth domain
 
 `.cogcog/system.md`:
 
-```
+```text
 You are a senior engineer.
 Be concise. Show code when relevant, explain when asked.
 This project uses Go, PostgreSQL, Redis.
