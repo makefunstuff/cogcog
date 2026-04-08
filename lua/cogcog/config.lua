@@ -40,6 +40,13 @@ function M.agent_cmd()
   end
 end
 
+function M.pi_rpc_cmd()
+  if vim.env.COGCOG_PI_RPC_CMD and vim.trim(vim.env.COGCOG_PI_RPC_CMD) ~= "" then
+    return vim.env.COGCOG_PI_RPC_CMD
+  end
+  return "pi --mode rpc --no-session"
+end
+
 function M.kb_path()
   if vim.env.COGCOG_KB and vim.trim(vim.env.COGCOG_KB) ~= "" then
     local p = vim.env.COGCOG_KB

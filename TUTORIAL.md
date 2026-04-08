@@ -484,14 +484,22 @@ This appends your feedback to `.cogcog/system.md`. Prompts improve per-project o
 
 ---
 
-## Part 12: Optional external execute
+## Part 12: Execute with pi RPC
 
-This is **disabled by default** and intentionally so.
+`<leader>gx` is the broad-write path. It uses pi RPC and keeps the workbench as the control surface.
 
-### 12a. Enable it
+### 12a. Optional override
+
+By default Cogcog starts:
 
 ```bash
-export COGCOG_AGENT_CMD="pi -p --no-session"    # or any agentic command
+pi --mode rpc --no-session
+```
+
+If you want a specific pi/provider/model command, set:
+
+```bash
+export COGCOG_PI_RPC_CMD="pi --mode rpc --no-session --provider github-copilot --model gpt-5.1-codex"
 ```
 
 ### 12b. Use it
@@ -500,12 +508,13 @@ export COGCOG_AGENT_CMD="pi -p --no-session"    # or any agentic command
 <leader>gx → "refactor auth across all files"
 ```
 
-Agent activity streams into the workbench. The prompt is anchored by visible windows, quickfix, and workbench contents.
+Activity streams into the workbench. The prompt is anchored by visible windows, quickfix, and workbench contents. If you trigger `<leader>gx` again while pi is still running, Cogcog sends a steering message into the same RPC session.
+If pi asks for confirmation, selection, or text input, Cogcog routes that through native Neovim UI. Multi-line editor requests open a temporary split.
 
 ### 12c. Why it's separate
 
 `<leader>gx` is the only verb that gives the model write access beyond the current operand.
-Everything else is bounded. This one is explicitly opted-in.
+Everything else is bounded. Use it when the workbench should drive multi-file execution, not as the default everyday path.
 
 ---
 
@@ -599,7 +608,7 @@ gaip                                    " explain with both visible
 ## Part 16: What Cogcog is NOT
 
 - **Not a chat harness.** No hidden session, no context accumulation unless you open the workbench.
-- **Not an autonomous agent.** `<leader>gx` is explicitly opt-in and disabled by default.
+- **Not an autonomous agent.** `<leader>gx` is a separate pi-RPC execution path for broader work, not the default everyday loop.
 - **Not a RAG system.** No background indexing, no embedding store.
 - **Not a persistent memory.** Each verb call is stateless. The workbench is opt-in persistence.
 - **Not fighting vim.** Motions, text objects, splits, quickfix, `gf`, `:read` — all work as vim intended.
@@ -628,7 +637,7 @@ gaip                                    " explain with both visible
 | `<leader>gR` | batch rewrite quickfix | fast |
 | `<leader>cd` | discover project | fast |
 | `<leader>cp` | improve prompt | instant |
-| `<leader>gx` | external execute | slow (opt-in) |
+| `<leader>gx` | pi RPC execute | slow |
 | `<C-c>` | cancel | instant |
 | `q` | close split | instant |
 | `a` | apply review buffer | instant |

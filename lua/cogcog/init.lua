@@ -492,12 +492,6 @@ end
 -- exec (gx): cloud agent, anchored by workbench + visible state
 
 local function exec_send(instruction)
-  local cmd = config.agent_cmd()
-  if not cmd then
-    vim.notify("cogcog: set COGCOG_AGENT_CMD to enable <leader>gx", vim.log.levels.WARN)
-    return
-  end
-
   local workbench = ctx.get_or_create_workbench()
 
   vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- exec: " .. instruction:sub(1, 50) .. " ---", "" })
@@ -511,15 +505,10 @@ local function exec_send(instruction)
 
   ctx.show_workbench()
 
-  stream.to_buf(input, workbench, {
-    cmd = cmd,
-    stderr_to_buf = true,
-    on_done = function()
-      if vim.api.nvim_buf_is_valid(workbench) then
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
-      end
-    end,
-  })
+  local rpc = require("cogcog.pi_rpc")
+  if not rpc.ensure_started(workbench, config.pi_rpc_cmd()) then return end
+  local message = table.concat(input, "\n")
+  if rpc.is_busy() then rpc.steer(message) else rpc.prompt(message) end
 end
 
 -- discover
@@ -1594,7 +1583,10 @@ vim.keymap.set("n", "<leader>cc", function()
 end, { desc = "cogcog: clear workbench" })
 
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
-  if next(stream.active_jobs) then
+  local rpc = require("cogcog.pi_rpc")
+  if rpc.is_busy() then
+    rpc.abort()
+  elseif next(stream.active_jobs) then
     stream.cancel_all()
   else
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-c>", true, false, true), "n", false)

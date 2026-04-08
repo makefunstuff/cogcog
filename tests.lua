@@ -219,6 +219,19 @@ test("agent_cmd is optional", function()
   vim.env.COGCOG_AGENT_CMD = old
 end)
 
+test("pi_rpc_cmd has a default", function()
+  local config = require("cogcog.config")
+  local old = vim.env.COGCOG_PI_RPC_CMD
+  vim.env.COGCOG_PI_RPC_CMD = nil
+  assert_equal(config.pi_rpc_cmd(), "pi --mode rpc --no-session")
+  vim.env.COGCOG_PI_RPC_CMD = old
+end)
+
+test("pi rpc modules load", function()
+  assert_true(type(require("cogcog.pi_rpc").is_busy) == "function")
+  assert_true(type(require("cogcog.pi_rpc_ui").handle) == "function")
+end)
+
 -- Test with_quickfix
 test("with_quickfix handles empty quickfix", function()
   vim.fn.setqflist({})

@@ -15,7 +15,7 @@ gsip / gss          generate → code buffer
 
 ```text
 <leader>gcip        check
-<leader>gx          optional external execute (in workbench)
+<leader>gx          pi RPC execute (in workbench)
 <leader>cd          discover project
 ```
 
@@ -62,7 +62,7 @@ dap                         delete section
 
 ```text
 COGCOG_FAST_MODEL   ga/gs/<C-g>/<leader>gr: fast model for bundled transport
-COGCOG_AGENT_CMD    <leader>gx: optional external execute command
+COGCOG_PI_RPC_CMD   <leader>gx: override pi RPC command/provider/model
 COGCOG_CHECKER      <leader>gc/<leader>cd: optional stronger review/discovery command
 ```
 
@@ -76,5 +76,5 @@ gd → gaip           definition → explain
 <leader>gj          investigate jump trail
 <leader>g.          review changes
 gsip → <leader>gcip generate → verify
-<C-g> → <leader>gx  plan → optional execute
+<C-g> → <leader>gx  plan → pi RPC execute
 ```

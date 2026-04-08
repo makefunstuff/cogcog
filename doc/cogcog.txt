@@ -4,7 +4,7 @@ INTRODUCTION                                    *cogcog*
 
 cogcog adds LLM verbs to vim. They compose with motions and text
 objects. Most verbs run at 0.3s via the bundled raw transport.
-External checker/execute commands are optional.
+External checker commands are optional. Broader execute uses pi RPC.
 
 Note: `ga` overrides show-ASCII, `gs` overrides sleep,
 `<C-g>` overrides show-file-info.
@@ -44,10 +44,13 @@ DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
                 command. Split reused.
 
                                                 *cogcog-gx*
-<leader>gx      Optional external execute. Runs in the workbench.
+<leader>gx      pi RPC execute. Runs in the workbench.
                 Uses visible state, quickfix, and workbench
-                contents as prompt anchors. Stderr shows inline as
-                progress. Disabled unless COGCOG_AGENT_CMD is set.
+                contents as prompt anchors. Starts
+                `pi --mode rpc --no-session` by default.
+                Set COGCOG_PI_RPC_CMD to override provider/model.
+                Repeated use while pi is active sends a steering turn.
+                UI requests use vim.ui and a temporary editor split.
 
                                                 *cogcog-cd*
 <leader>cd      Discover project. Writes .cogcog/discovery.md
@@ -133,15 +136,16 @@ Default behavior:
     No external harness is required for the core loop.
 
 Optional overrides:
-    gx              COGCOG_AGENT_CMD (explicit external execute command)
+    gx              COGCOG_PI_RPC_CMD (explicit pi RPC command)
     gc/discover     COGCOG_CHECKER (explicit stronger review/discovery command)
 
                                                 *cogcog-fast-model*
 COGCOG_FAST_MODEL   Fast model for most verbs via the bundled cogcog command.
 
-                                                *cogcog-agent-cmd*
-COGCOG_AGENT_CMD    Optional external execute command for <leader>gx.
-                When unset, <leader>gx is disabled and warns.
+                                                *cogcog-pi-rpc-cmd*
+COGCOG_PI_RPC_CMD   Optional pi RPC command for <leader>gx.
+                Default: `pi --mode rpc --no-session`.
+                Use it to pick a specific provider/model.
 
                                                 *cogcog-checker*
 COGCOG_CHECKER      Optional stronger command for check/discover.
@@ -195,7 +199,7 @@ Fast (0.3s): >
 <
 Optional: >
     <leader>gcip    check
-    <leader>gx      external execute
+    <leader>gx      pi RPC execute
     <leader>cd      discover
 <
 Other: >

@@ -684,6 +684,8 @@ function M.with_agent_instructions(input, mode)
     })
   elseif mode == "exec" then
     vim.list_extend(instructions, {
+      "Default to analysis and a concrete plan before editing.",
+      "Only edit when the user explicitly asks to implement, fix, change, or write code.",
       "Read files before making changes.",
       "Prefer editing existing code over creating new files.",
       "Run tests after changes if possible.",

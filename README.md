@@ -328,7 +328,7 @@ The KB should have a `wiki/` directory with markdown files.
 | `<leader>gR` | n | batch rewrite quickfix |
 | `<leader>cd` | n | discover project |
 | `<leader>cp` | n | improve prompt |
-| `<leader>gx` | n | external execute (opt-in) |
+| `<leader>gx` | n | pi RPC execute |
 | `<C-c>` | n/i | cancel |
 | `q` | split | close |
 | `a` | review | apply |

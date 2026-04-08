@@ -63,15 +63,17 @@ Fast workbench synthesis. Shows current filename in the prompt when invoked from
 By default this uses the bundled Cogcog transport.
 Set `COGCOG_CHECKER` only if you explicitly want a different command for deeper review.
 
-### Optional external execute
+### Execute with pi RPC
 
 ```text
 <leader>gx → "refactor auth across all files"
 <leader>gx → "add tests for the parser module"
 ```
 
-`<leader>gx` is disabled unless `COGCOG_AGENT_CMD` is set.
-When configured, activity shows in the workbench. Prompt anchors come from visible windows, quickfix, and the workbench.
+`<leader>gx` uses `pi --mode rpc --no-session` by default.
+Set `COGCOG_PI_RPC_CMD` if you want a different pi/provider/model command.
+Activity streams into the workbench. Prompt anchors come from visible windows, quickfix, and the workbench. If pi is already running for the current workbench turn, a new `<leader>gx` steers the active run instead of starting over.
+If pi requests UI, Cogcog uses native Neovim surfaces: `vim.ui.select()` / `vim.ui.input()` for prompts and a temporary split for multi-line editor requests.
 
 ### Discover project
 
