@@ -159,35 +159,112 @@ end
 -- Backward-compatible alias while the rest of the plugin migrates.
 M.with_panel = M.with_workbench
 
--- Search the knowledge base for relevant content.
+-- Build a compact index of all wiki pages in the KB.
+local function kb_build_index(wiki_dir)
+  local files = vim.fn.systemlist("find " .. vim.fn.shellescape(wiki_dir) .. " -name '*.md' -type f 2>/dev/null | sort")
+  if #files == 0 then return nil end
+  local index = {}
+  for _, f in ipairs(files) do
+    local rel = f:gsub("^" .. vim.pesc(wiki_dir) .. "/?", "")
+    local lines = vim.fn.readfile(f, "", 6)
+    local title = ""
+    local desc = ""
+    for _, line in ipairs(lines) do
+      if line:match("^#") and title == "" then
+        title = line:gsub("^#+%s*", "")
+      elseif line ~= "" and desc == "" and not line:match("^[-#]") then
+        desc = line:sub(1, 120)
+      end
+    end
+    table.insert(index, { path = f, rel = rel, title = title, desc = desc })
+  end
+  return index
+end
+
+-- LLM-powered KB search: send page index to model, get back relevant paths.
 function M.kb_search(query, max_results)
   local kb = config.kb_path()
   if not kb then return nil end
-  max_results = max_results or 10
+  max_results = max_results or 8
   local wiki_dir = kb .. "/wiki"
   if vim.fn.isdirectory(wiki_dir) == 0 then return nil end
-  -- grep the wiki for the query terms
-  local terms = {}
-  for word in query:gmatch("%S+") do
-    if #word > 2 then table.insert(terms, word) end
+
+  local index = kb_build_index(wiki_dir)
+  if not index or #index == 0 then return nil end
+
+  -- build compact index for the model
+  local prompt_lines = {
+    "You are a knowledge base search engine.",
+    "Given a query and a page index, return the most relevant page paths.",
+    "",
+    "Query: " .. query,
+    "",
+    "Pages:",
+  }
+  for _, entry in ipairs(index) do
+    local line = entry.rel
+    if entry.title ~= "" then line = line .. " — " .. entry.title end
+    if entry.desc ~= "" then line = line .. " | " .. entry.desc end
+    table.insert(prompt_lines, line)
   end
-  if #terms == 0 then return nil end
-  local pattern = table.concat(terms, "\\|")
-  local cmd = "grep -rli " .. vim.fn.shellescape(pattern) .. " " .. vim.fn.shellescape(wiki_dir) .. " 2>/dev/null | head -" .. max_results
-  local files = vim.fn.systemlist(cmd)
-  if #files == 0 then return nil end
+  table.insert(prompt_lines, "")
+  table.insert(prompt_lines, "Return up to " .. max_results .. " most relevant page paths, one per line.")
+  table.insert(prompt_lines, "Output ONLY the paths, nothing else. No numbering, no explanation.")
+
+  local tmp = vim.fn.tempname()
+  vim.fn.writefile(prompt_lines, tmp)
+  local cmd = config.checker_cmd() .. " < " .. vim.fn.shellescape(tmp)
+  local raw_output = vim.fn.systemlist("bash -c " .. vim.fn.shellescape(cmd))
+  vim.fn.delete(tmp)
+
+  if vim.v.shell_error ~= 0 then return nil end
+
+  -- build a lookup from relative path → full path
+  local lookup = {}
+  for _, entry in ipairs(index) do
+    lookup[entry.rel] = entry
+    -- also index by path fragments (model might return partial paths)
+    local basename = entry.rel:match("[^/]+$") or entry.rel
+    if not lookup[basename] then lookup[basename] = entry end
+  end
+
+  -- parse model output into results
   local results = {}
-  for _, f in ipairs(files) do
-    local rel = vim.fn.fnamemodify(f, ":.")
-    local lines = vim.fn.readfile(f, "", 30)
-    local title = lines[1] or rel
-    title = title:gsub("^#+%s*", "")
-    -- grab first non-empty content lines
-    local snippet = {}
-    for i = 2, math.min(#lines, 8) do
-      if lines[i] ~= "" then table.insert(snippet, lines[i]) end
+  local seen = {}
+  for _, line in ipairs(raw_output) do
+    line = vim.trim(line)
+    line = line:gsub("^%d+[%.%)%s]+", "")  -- strip numbering
+    line = line:gsub("^`(.-)`.*", "%1")     -- unwrap backticks
+    line = line:gsub("^%-+%s*", "")         -- strip list markers
+    line = vim.trim(line)
+    if line == "" then goto continue end
+
+    -- try exact match, then suffix match
+    local entry = lookup[line]
+    if not entry then
+      for _, e in ipairs(index) do
+        if e.rel:find(line, 1, true) or e.path:find(line, 1, true) then
+          entry = e
+          break
+        end
+      end
     end
-    table.insert(results, { path = rel, title = title, snippet = table.concat(snippet, "\n") })
+    if entry and not seen[entry.path] then
+      seen[entry.path] = true
+      local flines = vim.fn.readfile(entry.path, "", 20)
+      local snippet = {}
+      for i = 2, math.min(#flines, 12) do
+        if flines[i] ~= "" then table.insert(snippet, flines[i]) end
+      end
+      table.insert(results, {
+        path = entry.rel,
+        full_path = entry.path,
+        title = entry.title,
+        snippet = table.concat(snippet, "\n"),
+      })
+    end
+    if #results >= max_results then break end
+    ::continue::
   end
   return results
 end

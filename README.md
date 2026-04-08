@@ -135,28 +135,49 @@ Quickfix is the hard boundary. Cogcog never roams beyond it.
 ### 8. Discover (unfamiliar code)
 
 ```
-<leader>cd                          scout the project
+<leader>cd                          project dashboard
 ```
 
-Discovery gathers from multiple sources before asking the model:
+Discovery pre-computes real stats in Lua, then asks the model to fill in the
+intelligent parts. The result is a markdown dashboard, not a README summary:
 
-| Source | What |
-|--------|------|
-| File tree | directory structure (3 levels) |
-| Package manifest | dependencies, scripts, metadata |
-| Entry points | main/index/app files |
-| Git log | recent 20 commits |
-| README | project description |
-| **Treesitter** | top-level declarations (functions, types, structs) |
-| **LSP symbols** | document symbols from loaded buffers |
-| **Diagnostics** | error/warning counts |
-| **Knowledge base** | relevant team docs, decisions, gotchas (if `COGCOG_KB` set) |
+```markdown
+# 📋 cogcog
 
-Produces a two-part discovery note:
-- **Project Map** — every file organized by domain, `gf`-navigable
-- **Candidate Files** — the 5–15 files to read first
+| | |
+|---|---|
+| 🔀 Branch | `master` |
+| 📁 Files | 24 |
+| 📏 Source LOC | 1,890 |
+| 📝 Commits | 47 |
+| 🕐 Last commit | f19104e rewrite discovery (2 hours ago) |
+| 🩺 Health | ❌0 ⚠️2 ℹ️0 💡3 |
 
-Then: `gf` into a file → `gaip` to understand → `<leader>gy` to pin → `<C-g>` to synthesize.
+## 🏗 Architecture
+    init.lua ──→ context.lua ──→ stream.lua ──→ bin/cogcog
+
+## 📦 Modules
+### Core
+| File | LOC | Role |
+|------|-----|------|
+| `lua/cogcog/init.lua` | ~890 | keymaps, verbs, tools |
+| `lua/cogcog/context.lua` | ~210 | scope builders, KB |
+...
+```
+
+Data sources:
+
+| Pre-computed (Lua) | Model fills in |
+|--------------------|----------------|
+| File count, LOC, git stats | Architecture paragraph + diagram |
+| File type breakdown | Module groupings + tables |
+| Treesitter declarations | Entry points + call flow |
+| LSP symbols | Stack + patterns |
+| Diagnostics counts | Issues (if any) |
+| KB search results | Team knowledge (if KB set) |
+
+KB search is **LLM-powered**: sends the full page index to the model, gets
+back the relevant paths. Not grep — the model understands what's related.
 
 ### 9. Project tools (`.cogcog/tools/`)
 
