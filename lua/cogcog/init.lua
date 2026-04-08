@@ -333,9 +333,12 @@ local function parse_tool_call(lines)
   return nil
 end
 
+local plan_turns = 0
+
 local function plan_send(question)
   local workbench = ctx.get_or_create_workbench()
   if question then
+    plan_turns = 0  -- reset on user-initiated turn
     vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", question, "" })
   end
   ctx.show_workbench()
@@ -353,10 +356,23 @@ local function plan_send(question)
     on_done = function()
       if not vim.api.nvim_buf_is_valid(workbench) then return end
       local all = vim.api.nvim_buf_get_lines(workbench, 0, -1, false)
-      local name, args, _line_idx = parse_tool_call(all)
+      local name, args, line_idx = parse_tool_call(all)
       if not name then
         -- no tool call — normal completion
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
+        return
+      end
+
+      -- replace the marker so it can't re-match on next turn
+      vim.api.nvim_buf_set_lines(workbench, line_idx - 1, line_idx, false,
+        { "🔧 " .. name .. "(" .. args .. ")" })
+
+      -- safety: cap tool turns
+      plan_turns = (plan_turns or 0) + 1
+      if plan_turns > 5 then
+        plan_turns = 0
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool limit reached (5 turns) ---", "", "---", "", "" })
+        vim.notify("cogcog: tool turn limit reached", vim.log.levels.WARN)
         return
       end
 
@@ -364,7 +380,7 @@ local function plan_send(question)
       local mode = vim.g.cogcog_tool_mode or "ask"
       local auto = (mode == "trust") or (mode == "read" and is_read_only_tool(name))
 
-      if auto then
+      local function run_tool()
         local result = execute_tool(name, args)
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
           "", "--- tool: " .. name .. " ---", ""
@@ -372,27 +388,25 @@ local function plan_send(question)
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
         stream._scroll_buf(workbench)
-        -- continue: call plan_send again with updated workbench
         plan_send(nil)
+      end
+
+      if auto then
+        run_tool()
       else
         vim.ui.select({ "y — execute", "n — skip" }, {
           prompt = "🔧 " .. name .. "(" .. args .. ")",
         }, function(choice)
           if not vim.api.nvim_buf_is_valid(workbench) then return end
           if choice and choice:match("^y") then
-            local result = execute_tool(name, args)
-            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
-              "", "--- tool: " .. name .. " ---", ""
-            })
-            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
-            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
-            stream._scroll_buf(workbench)
-            plan_send(nil)
+            run_tool()
           else
+            plan_turns = 0
             vim.api.nvim_buf_set_lines(workbench, -1, -1, false, {
               "", "--- tool: " .. name .. " (skipped) ---", "", "---", "", ""
             })
             stream._scroll_buf(workbench)
+          end
           end
         end)
       end
