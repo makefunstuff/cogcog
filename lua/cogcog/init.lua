@@ -726,8 +726,8 @@ local function do_discover(discovery_file, update)
     if kb_results and #kb_results > 0 then
       table.insert(input, "--- raw: knowledge base (" .. #kb_results .. " pages) ---")
       for _, r in ipairs(kb_results) do
-        table.insert(input, "📚 " .. r.title .. " (" .. r.path .. ")")
-        table.insert(input, r.snippet)
+        table.insert(input, "📚 " .. (r.title or "") .. " (" .. (r.path or "") .. ")")
+        if r.snippet and r.snippet ~= "" then table.insert(input, r.snippet) end
         table.insert(input, "")
       end
     end
