@@ -280,9 +280,14 @@ end
 
 -- Workbench ---------------------------------------------------------------
 
+local function buf_name_ends_with(buf, suffix)
+  return vim.api.nvim_buf_is_valid(buf)
+    and vim.api.nvim_buf_get_name(buf):match(vim.pesc(suffix) .. "$") ~= nil
+end
+
 function M.get_or_create_workbench()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == WORKBENCH_NAME then
+    if buf_name_ends_with(buf, WORKBENCH_NAME) then
       return buf
     end
   end
@@ -299,7 +304,7 @@ end
 
 function M.is_workbench(buf)
   buf = buf or vim.api.nvim_get_current_buf()
-  return vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == WORKBENCH_NAME
+  return buf_name_ends_with(buf, WORKBENCH_NAME)
 end
 
 function M.workbench_win()
