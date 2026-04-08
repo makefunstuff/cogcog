@@ -2,304 +2,221 @@
 
 LLM as a vim verb.
 
-Cogcog is a Neovim plugin for **bounded AI work**:
+## How it works
 
-- operand-local explain / ask / generate / rewrite / check
-- quickfix-scoped batch review and rewrite
-- a plain editable **workbench** buffer for planning and imports
-- a lightweight **discovery note** for unfamiliar code
-
-It is inspired in part by Mario Zechner’s essay
-[*Thoughts on slowing the fuck down*](https://mariozechner.at/posts/2026-03-25-thoughts-on-slowing-the-fuck-down/):
-**the goal is not blind throughput, but visible scope, review, and judgment.**
-
-If you want a chat harness with hidden context accumulation and autonomy theater, this is not that.
-If you want Neovim-native leverage on work you can still inspect and steer, that is the point.
-
-## What you can do
-
-```text
-gaip                                 instant explain (0.3s, no prompt)
-Visual ga → "is this thread-safe?"   ask a specific question
-gsaf → "add error handling"          generate code (0.3s, raw API)
-<leader>graf → "simplify"            refactor (small = inline, large = review)
-:grep "TODO" src/**                  build a deliberate target set
-<leader>gQ                           review the current quickfix set
-<leader>gR                           prepare batch rewrite → review → apply
-<C-g> → "design the auth flow"       synthesize in workbench
-<leader>cd                           map project by domain
-<leader>gx → "implement it"          optional external execute
+```
+ you see code ──→ you act on it ──→ you review the result
+     │                 │                    │
+  screen is         ga  gs  gr  gc       split / inline / review buffer
+  your context      motion or visual       q to close, u to undo, a to apply
 ```
 
-## Core surfaces
+There is no chat. No hidden context. No session history.
+Each verb is a stateless call on the text you pointed it at.
+Your visible windows are the context. Quickfix is the batch boundary.
 
-| Surface | What it is for |
-|---------|-----------------|
-| **Operand** | `ga` / `gs` / `gr` / `gc` on a motion, selection, or buffer |
-| **Quickfix** | deliberate multi-location target sets for summarize / review / rewrite |
-| **Workbench** | planning, synthesis, imports, and longer visible text work |
-| **Discovery note** | scout-style project map and candidate files |
+## The workflow
 
-`<leader>gx` still exists for explicit external execute, but it should stay secondary to the **operand → quickfix → workbench** loop.
+### 1. Understand
 
-## Scope model
+```
+gaip           explain this paragraph
+gaf            explain this function
+gaa            explain entire file
+V → ga         ask "is this thread-safe?"
+```
 
-Cogcog currently treats context in three buckets:
+No prompt needed for explain. Count controls depth: `1gaip` one sentence, `3gaip` detailed.
 
-- **hard scope** — the explicit operand or target set
-  - selection / motion target
-  - whole buffer
-  - quickfix entries for batch work
-- **explicit imports** — text you deliberately bring in
-  - workbench contents
-  - pinned snippets
-  - `:read !cmd` output
-- **soft context** — supporting nearby signals
-  - visible windows
+### 2. Generate
 
-Quickfix is the batch boundary when present.
-Visible windows help with grounding, but they are not a license to roam the whole repo.
+```
+gsip → "implement this TODO"
+gsaf → "add error handling"
+gss  → "scaffold the module"
+```
 
-## Verbs
+Output lands in a code buffer. `:w filename` to save.
 
-| Verb | What | Speed | Output |
-|------|------|-------|--------|
-| `ga{motion}` / `gaa` | explain | 0.3s | side split (reused) |
-| visual `ga` | ask (prompted) | 0.3s | side split (reused) |
-| `gs{motion}` / `gss` | generate | 0.3s | code buffer |
-| `<leader>gr{motion}` | refactor in-place | 0.3s | inline for small rewrites, review buffer for larger ones |
-| `<leader>gc{motion}` | check | 0.3s by default, overrideable | side split (reused) |
+### 3. Refactor
 
-Count controls verbosity: `gaip` concise, `1gaip` one sentence, `3gaip` detailed.
+```
+<leader>grip → "simplify"
+<leader>graf → "convert to async"
+V → <leader>gr → "add types"
+```
 
-Small refactors still apply directly and stay undoable with `u`.
-Larger refactors open a review buffer with a unified diff. Press `a` to apply, `q` to close.
+Small rewrites go inline (`u` to undo). Large rewrites open a review buffer (`a` to apply, `q` to reject).
 
-All splits close with `q` and reuse the same window.
+### 4. Check
 
-## Quickfix-first batch work
+```
+<leader>gcaf        review this function
+<leader>gcip        review this paragraph
+```
 
-| Keymap | Context source |
-|--------|----------------|
-| `ga` | visible windows + quickfix |
-| `<leader>gj` | last 8 jump locations |
-| `<leader>g.` | recently edited lines |
-| `<leader>gq` / `<leader>gQ` | summarize / review current quickfix set |
-| `<leader>gR` | prepare, review, and apply current quickfix target set |
-| `<leader>gx` | visible windows + quickfix + workbench |
+### 5. Plan (workbench)
 
-Typical loop:
+```
+<leader>co                          open workbench
+<C-g> → "design the auth flow"     synthesize
+<C-g> → "use token bucket"         continue
+<leader>co                          close — back to stateless
+```
+
+The workbench is a plain markdown buffer. Pin code with `<leader>cy`, import context with `:read !git diff`, edit freely with normal vim.
+
+### 6. Batch (quickfix)
 
 ```vim
-:grep "TODO" src/**
-<leader>gQ
-<leader>gR
+:grep "TODO" src/**                 build target set
+<leader>gQ                          review the set
+<leader>gR                          prepare rewrite → review → apply
 ```
 
-`<leader>gR` prepares rewrites for merged quickfix targets, opens a review buffer with diffs, and only applies when you press `a`.
-Targets that changed since review are skipped.
+Quickfix is the hard boundary. Cogcog never roams beyond it.
 
-## Workbench
+### 7. Discover (unfamiliar code)
 
-The workbench is a plain editable markdown buffer.
-Use it for:
-
-- pinned snippets from multiple files
-- `:read !git diff` / logs / grep output
-- planning notes
-- imported docs or research snippets
-- longer back-and-forth when a simple operator call is not enough
-
-```text
-<C-g> → "add rate limiting"          fast workbench synthesis (raw API)
-<C-g> → "use token bucket"           continues in workbench
-<leader>gx → "implement it"          optional external execute in workbench
+```
+<leader>cd                          scout the project
 ```
 
-Open it with `<leader>co`.
-Workbench contents auto-save on exit to `.cogcog/workbench.md`.
-Legacy `.cogcog/session.md` is treated as a migration source.
+Produces a two-part discovery note:
+- **Project Map** — every file organized by domain, `gf`-navigable
+- **Candidate Files** — the 5–15 files to read first
 
-## Discovery
+Then: `gf` into a file → `gaip` to understand → `<leader>cy` to pin → `<C-g>` to synthesize.
 
-```text
-<leader>cd                            map project
+### 8. Investigate
+
+```
+gd → gd → gd                       navigate normally
+<leader>gj                          how do these locations connect?
+<leader>g.                          any bugs in my changes?
 ```
 
-`gf`-navigable output is saved to `.cogcog/discovery.md`.
-Options: Open / Update / Re-discover.
-By default it uses the bundled Cogcog transport.
-Set `COGCOG_CHECKER` only if you explicitly want a different command for review/discovery.
+## The loop
 
-## Install with lazy.nvim
+Most real work follows one of these paths:
+
+```
+understand          gaip → read → gaip → read
+                    ↓
+generate            gsaf → :w → :make → fix
+                    ↓
+refactor            <leader>graf → review → iterate
+                    ↓
+verify              <leader>gcaf → done or back to refactor
+```
+
+```
+orient              <leader>cd → gf → gaip → <leader>cy
+                    ↓
+plan                <leader>co → <C-g> → <C-g>
+                    ↓
+batch               :grep → <leader>gR → :make
+```
+
+## Context model
+
+| Tier | What | You control it by |
+|------|------|-------------------|
+| **Hard scope** | the text you act on | motion, selection, buffer |
+| **Explicit imports** | text you brought in | workbench, `<leader>cy`, `:read` |
+| **Soft context** | nearby signals | visible windows |
+
+Your screen is your context. Split two files side by side → `gaip` sees both.
+Close one → it sees one. No `@file` mentions needed.
+
+Quickfix is the batch scope. When populated, it's included automatically.
+
+## Install
 
 ```lua
-{
-  "makefunstuff/cogcog",
-  config = function()
-    require("cogcog")
-  end,
-}
+-- lazy.nvim
+{ "makefunstuff/cogcog", config = function() require("cogcog") end }
 ```
 
-No separate `cogcog` binary install is required for the plugin path above.
-When installed from git, Cogcog uses the bundled `bin/cogcog` automatically.
-
-## Requirements
-
-For the bundled transport you need:
-
-- `bash`
-- `curl` and `jq` (for anthropic/openai backends)
-- one model provider configured
-
-### Quickest setup: copilot backend (recommended)
-
-If you have [pi](https://github.com/badlogic/pi-mono) installed and authenticated
-with GitHub Copilot:
+### Backend setup
 
 ```bash
+# recommended: GitHub Copilot (no API key needed, 14ms overhead)
 export COGCOG_BACKEND=copilot
-```
+# smart: claude-opus-4.6, fast: claude-sonnet-4.6
 
-That's it. Reads pi's OAuth token directly, calls the Copilot API with plain `curl`.
-**14ms overhead**, auto-refreshes expired tokens.
-
-- Smart model (default): **claude-opus-4.6**
-- Fast model (`--raw`): **claude-sonnet-4.6**
-
-```bash
-# optionally override
-export COGCOG_MODEL=claude-sonnet-4.5   # smart override
-export COGCOG_FAST_MODEL=claude-haiku-4.5  # fast override
-```
-
-### Alternative: codex backend
-
-For ChatGPT Plus/Pro Codex subscription:
-
-```bash
+# or: OpenAI Codex (no API key needed, 18ms overhead)
 export COGCOG_BACKEND=codex
-# default model: gpt-5.4
-```
+# default: gpt-5.4
 
-Same 18ms overhead, same auto-refresh from pi's `auth.json`.
-
-### Direct API backends
-
-```bash
-# Anthropic (default backend)
+# or: direct Anthropic
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# or any OpenAI-compatible endpoint
+# or: any OpenAI-compatible endpoint
 export COGCOG_BACKEND=openai
-export COGCOG_API_URL=http://localhost:8090/v1/chat/completions
+export COGCOG_API_URL=http://localhost:11434/v1/chat/completions
 export COGCOG_API_KEY=your-key
-export COGCOG_FAST_MODEL="your-model"
 ```
 
-### Slow but universal: pi backend
+Both `copilot` and `codex` read OAuth tokens from [pi](https://github.com/badlogic/pi-mono)'s `~/.pi/agent/auth.json`. Run `pi /login` once to authenticate.
 
-If you need a provider that isn't anthropic/openai/codex/copilot:
-
-```bash
-export COGCOG_BACKEND=pi
-export COGCOG_PI_PROVIDER=google     # any pi provider
-```
-
-This delegates to `pi -p` (~0.7s startup overhead). Fine for `<leader>gc` / `<leader>gx`,
-not ideal for fast verbs.
-
-## Configuration
-
-### Default core path
-
-By default, core Cogcog behavior uses the bundled `bin/cogcog` transport:
-
-- `ga`, `gs`, `gr`, `<C-g>`
-- `gc`
-- `cd`
-
-This means the core loop does **not** assume `pi`, `opencode`, Claude Code, or any other external harness.
-
-### Optional overrides
-
-```bash
-# optional: stronger separate command for check/discover
-export COGCOG_CHECKER="your-review-command"
-
-# optional: explicit external execute command for <leader>gx
-export COGCOG_AGENT_CMD="your-execute-command"
-
-# bundled cogcog transport
-export COGCOG_MODEL="model-name"        # default model when FAST_MODEL not set
-export COGCOG_MAX_TOKENS=8192
-export COGCOG_SYSTEM="be concise"
-```
-
-`<leader>gx` is intentionally **disabled unless `COGCOG_AGENT_CMD` is set**.
+Requires: `bash`, `curl`, `jq`.
 
 ## All keymaps
 
 | Key | Mode | What |
 |-----|------|------|
-| `ga{motion}` | n | explain (no prompt, count = verbosity) |
+| `ga{motion}` | n | explain (count = verbosity) |
 | `gaa` | n | explain entire buffer |
-| `ga` | v | ask (prompted) |
+| `ga` | v | ask with prompt |
 | `gs{motion}` / `gss` | n | generate → code buffer |
 | `gs` | v | generate from selection |
 | `<leader>gr{motion}` | n | refactor in-place |
 | `<leader>gr` | v | refactor selection |
 | `<leader>gc{motion}` | n | check |
 | `<leader>gc` | v | check selection |
-| `<C-g>` | n | plan / synthesize (fast, in workbench) |
+| `<C-g>` | n | synthesize in workbench |
 | `<leader>cy` | v | pin to workbench |
 | `<leader>co` | n | toggle workbench |
-| `<leader>gx` | n | optional external execute (in workbench) |
-| `<leader>gj` | n | ask about jump trail |
-| `<leader>g.` | n | review recent changes |
-| `<leader>gq` | n | summarize current quickfix set |
-| `<leader>gQ` | n | review current quickfix set |
-| `<leader>gR` | n | prepare, review, and apply current quickfix target set |
-| `<leader>cd` | n | discover / update project |
-| `<leader>cp` | n | improve prompt |
 | `<leader>cc` | n | clear workbench |
-| `<C-c>` | n/i | cancel running job |
-| `a` | review | apply prepared review buffer |
-| `q` | response/review | close split |
+| `<leader>gj` | n | jump trail |
+| `<leader>g.` | n | review recent changes |
+| `<leader>gq` | n | summarize quickfix |
+| `<leader>gQ` | n | review quickfix |
+| `<leader>gR` | n | batch rewrite quickfix |
+| `<leader>cd` | n | discover project |
+| `<leader>cp` | n | improve prompt |
+| `<leader>gx` | n | external execute (opt-in) |
+| `<C-c>` | n/i | cancel |
+| `q` | split | close |
+| `a` | review | apply |
+| `u` | after refactor | undo |
 
-## Context management (native vim)
+## Per-project prompts
 
-```vim
-:read .cogcog/review.md     " add a skill
-:read !git diff             " add tool output
-dap                         " delete a section
+`.cogcog/system.md` is loaded automatically. Improve it incrementally:
+
+```
+<leader>cp → "too generic, read the actual code"
 ```
 
-System prompt comes from `.cogcog/system.md`.
+## Philosophy
 
-## Optional shell use
+Inspired by Mario Zechner's [*Thoughts on slowing the fuck down*](https://mariozechner.at/posts/2026-03-25-thoughts-on-slowing-the-fuck-down/).
 
-The bundled transport is also a small CLI:
+The goal is not blind throughput. It's visible scope, review, and judgment.
+You should always know what the model saw, what it changed, and how to undo it.
 
-```bash
-echo "explain CRDs" | bin/cogcog
-git diff --staged | bin/cogcog --raw "review this"
-```
-
-That shell path is optional. The main product is the Neovim plugin.
-
-See **[TUTORIAL.md](TUTORIAL.md)**, **[USAGE.md](USAGE.md)**, **[UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)**.
-Run `:help cogcog` in Neovim.
+See [TUTORIAL.md](TUTORIAL.md), [USAGE.md](USAGE.md), [UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md).
 
 ## Structure
 
-```text
-bin/cogcog                  # bundled transport used by the plugin
-lua/cogcog/init.lua         # verbs and keymaps
-lua/cogcog/stream.lua       # shared streaming
-lua/cogcog/context.lua      # input builders, workbench, helpers
-lua/cogcog/config.lua       # paths and config
-doc/cogcog.txt              # :help cogcog
-.cogcog/                    # project prompts and templates
+```
+bin/cogcog               stdin → LLM → stdout (bundled transport)
+lua/cogcog/init.lua      verbs and keymaps
+lua/cogcog/stream.lua    streaming to buffers
+lua/cogcog/context.lua   scope builders, workbench, helpers
+lua/cogcog/config.lua    paths and config
+doc/cogcog.txt           :help cogcog
+.cogcog/                 per-project prompts and state
 ```
