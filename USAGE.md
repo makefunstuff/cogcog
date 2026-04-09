@@ -87,11 +87,11 @@ bin/cogcog-harness
 This starts or attaches to `.cogcog/pi-bridge.sock`.
 When that socket exists, Neovim auto-attaches to it; otherwise it falls back to spawning pi directly.
 Use `COGCOG_PI_SOCKET` to override the socket path.
+Launch the harness in a separate terminal, not inside Neovim.
 
 Useful Neovim commands:
 
 ```vim
-:CogcogHarness          " open an embedded harness terminal
 :CogcogCompanionStatus  " show companion socket / RPC mode
 :CogcogCompanionStop    " stop the broker
 :CogcogDetach           " detach the current local pi channel

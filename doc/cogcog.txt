@@ -56,7 +56,6 @@ DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
 
 USER COMMANDS                                    *cogcog-commands*
 
-:CogcogHarness          Open an embedded harness terminal.
 :CogcogCompanionStatus  Show socket/attach state.
 :CogcogCompanionStop    Stop the companion broker.
 :CogcogDetach           Detach the current local pi channel.
@@ -203,7 +202,6 @@ Companion harness:
 >
     bin/cogcog-bridge   start shared pi RPC broker
     bin/cogcog-harness  start/attach terminal harness client
-    :CogcogHarness      open embedded harness terminal
 <
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*

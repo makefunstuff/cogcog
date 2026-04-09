@@ -1601,24 +1601,6 @@ local function socket_exists()
   return socket ~= "" and uv and uv.fs_stat(socket) ~= nil
 end
 
-local function open_harness()
-  local buf = vim.api.nvim_create_buf(false, true)
-  local win = ctx.make_split(true, buf, " 🧵 harness │ q close")
-  vim.api.nvim_set_current_win(win)
-  vim.fn.termopen({ config.harness_bin(), "--socket", config.pi_socket_path() }, {
-    on_exit = function(_, code)
-      vim.schedule(function()
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_set_option_value("statusline", " 🧵 harness │ exited " .. tostring(code), { win = win })
-        end
-      end)
-    end,
-  })
-  vim.cmd("startinsert")
-end
-
-vim.api.nvim_create_user_command("CogcogHarness", open_harness, { desc = "Open companion harness terminal" })
-
 vim.api.nvim_create_user_command("CogcogDetach", function()
   local rpc = require("cogcog.pi_rpc")
   if rpc.detach() then

@@ -58,14 +58,6 @@ function M.pi_socket_path()
   return M.cogcog_dir .. "/pi-bridge.sock"
 end
 
-function M.bridge_bin()
-  return bundled_bin("cogcog-bridge") or (vim.fn.exepath("cogcog-bridge") ~= "" and vim.fn.exepath("cogcog-bridge")) or "cogcog-bridge"
-end
-
-function M.harness_bin()
-  return bundled_bin("cogcog-harness") or (vim.fn.exepath("cogcog-harness") ~= "" and vim.fn.exepath("cogcog-harness")) or "cogcog-harness"
-end
-
 function M.kb_path()
   if vim.env.COGCOG_KB and vim.trim(vim.env.COGCOG_KB) ~= "" then
     local p = vim.env.COGCOG_KB

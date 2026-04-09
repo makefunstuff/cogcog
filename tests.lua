@@ -203,12 +203,6 @@ test("config resolves bundled cogcog binary when available", function()
   end
 end)
 
-test("config resolves companion binaries", function()
-  local config = require("cogcog.config")
-  assert_true(type(config.bridge_bin()) == "string" and config.bridge_bin() ~= "")
-  assert_true(type(config.harness_bin()) == "string" and config.harness_bin() ~= "")
-end)
-
 test("checker_cmd falls back to bundled raw path", function()
   local config = require("cogcog.config")
   local old = vim.env.COGCOG_CHECKER

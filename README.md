@@ -132,10 +132,10 @@ This keeps the current editor-native flow intact, but adds a second terminal UI
 that can share the same live pi RPC session with Neovim through
 `.cogcog/pi-bridge.sock`.
 
-Useful commands inside Neovim:
+Launch it in a separate terminal from the project root.
+Useful Neovim-side commands:
 
 ```vim
-:CogcogHarness          " open an embedded harness terminal
 :CogcogCompanionStatus  " show socket/attach state
 :CogcogCompanionStop    " stop the broker
 :CogcogDetach           " detach Neovim from the current pi channel

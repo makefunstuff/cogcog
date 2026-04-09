@@ -78,8 +78,7 @@ gd → gaip           definition → explain
 <leader>g.          review changes
 gsip → <leader>gcip generate → verify
 <C-g> → <leader>gx  plan → pi RPC execute
-bin/cogcog-harness  optional shared terminal harness
-:CogcogHarness      open embedded harness terminal
+bin/cogcog-harness  optional shared terminal harness (separate terminal)
 :CogcogCompanionStop stop companion broker
 :CogcogDetach       detach current local pi channel
 ```

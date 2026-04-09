@@ -609,7 +609,7 @@ gaip                                    " explain with both visible
 
 - **Not a chat harness.** No hidden session, no context accumulation unless you open the workbench.
 - **Not an autonomous agent.** `<leader>gx` is a separate pi-RPC execution path for broader work, not the default everyday loop.
-- **Companion mode is optional.** If you run `bin/cogcog-harness` or `:CogcogHarness`, Neovim can share that live pi session, but the normal editor-native flow stays the default.
+- **Companion mode is optional.** If you run `bin/cogcog-harness` in a separate terminal, Neovim can share that live pi session, but the normal editor-native flow stays the default.
 - **Not a RAG system.** No background indexing, no embedding store.
 - **Not a persistent memory.** Each verb call is stateless. The workbench is opt-in persistence.
 - **Not fighting vim.** Motions, text objects, splits, quickfix, `gf`, `:read` — all work as vim intended.
@@ -639,7 +639,7 @@ gaip                                    " explain with both visible
 | `<leader>cd` | discover project | fast |
 | `<leader>cp` | improve prompt | instant |
 | `<leader>gx` | pi RPC execute | slow |
-| `:CogcogHarness` | open embedded harness terminal | instant |
+| `bin/cogcog-harness` | start companion harness in a separate terminal | instant |
 | `:CogcogCompanionStop` | stop companion broker | instant |
 | `<C-c>` | cancel | instant |
 | `q` | close split | instant |
