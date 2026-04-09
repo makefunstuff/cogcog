@@ -2,7 +2,7 @@ local config = require("cogcog.config")
 local stream = require("cogcog.stream")
 local ui = require("cogcog.pi_rpc_ui")
 
-local M = { job = nil, buf = nil, busy = false, partial = "", seq = 0, changed = {}, ui = {} }
+local M = { job = nil, buf = nil, busy = false, partial = "", seq = 0, changed = {}, ui = {}, current_text = false }
 
 local function running()
   return type(M.job) == "number" and M.job > 0 and vim.fn.jobwait({ M.job }, 0)[1] == -1
@@ -70,18 +70,37 @@ local function handle_ui(req)
   ui.handle(req, send, notify, append_lines, M.ui)
 end
 
+local function message_text(msg)
+  local out = {}
+  for _, part in ipairs((msg or {}).content or {}) do
+    if part.type == "text" and part.text and part.text ~= "" then out[#out + 1] = part.text end
+  end
+  return #out > 0 and table.concat(out, "\n") or nil
+end
+
 local function handle(line)
   local ok, obj = pcall(vim.json.decode, line)
   if not ok or type(obj) ~= "table" then return notify("cogcog: bad pi rpc message", vim.log.levels.WARN) end
   if obj.type == "response" then
     if obj.success == false then M.busy = false; notify("cogcog: pi rpc " .. (obj.error or obj.command or "error"), vim.log.levels.ERROR) end
   elseif obj.type == "agent_start" then
-    M.busy = true
+    M.busy, M.current_text = true, false
   elseif obj.type == "agent_end" then
     M.busy = false; refresh_changed()
+  elseif obj.type == "message_start" then
+    local msg = obj.message or {}
+    if msg.role == "assistant" then M.current_text = false end
   elseif obj.type == "message_update" then
     local ev = obj.assistantMessageEvent or {}
-    if ev.type == "text_delta" then append_text(ev.delta or "") end
+    if ev.type == "text_delta" then M.current_text = true; append_text(ev.delta or "") end
+  elseif obj.type == "message_end" then
+    local msg = obj.message or {}
+    if msg.role == "assistant" and msg.stopReason == "error" and msg.errorMessage then
+      append_lines({ "", "✗ " .. msg.errorMessage, "" })
+    elseif msg.role == "assistant" and not M.current_text then
+      local text = message_text(msg)
+      if text then append_text(text) end
+    end
   elseif obj.type == "tool_execution_start" then
     append_lines({ "", "🔧 " .. tostring(obj.toolName or "tool") .. tool_target(obj.args), "" })
   elseif obj.type == "tool_execution_end" then
@@ -96,7 +115,7 @@ end
 function M.ensure_started(buf, cmd)
   M.buf = buf
   if running() then return true end
-  M.busy, M.partial, M.changed, M.ui = false, "", {}, {}
+  M.busy, M.partial, M.changed, M.ui, M.current_text = false, "", {}, {}, false
   local job = vim.fn.jobstart({ "bash", "-c", cmd or config.pi_rpc_cmd() }, {
     stdout_buffered = false,
     on_stdout = function(_, data)
@@ -116,7 +135,7 @@ function M.ensure_started(buf, cmd)
       if msg ~= "" then notify("pi rpc: " .. msg:sub(1, 200), vim.log.levels.WARN) end
     end,
     on_exit = function(_, code)
-      M.job, M.busy, M.partial, M.changed, M.ui = nil, false, "", {}, {}
+      M.job, M.busy, M.partial, M.changed, M.ui, M.current_text = nil, false, "", {}, {}, false
       if code ~= 0 then notify("cogcog: pi rpc exited " .. code, vim.log.levels.ERROR) end
     end,
   })
