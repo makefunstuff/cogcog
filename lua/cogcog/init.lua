@@ -409,6 +409,8 @@ local function parse_tool_call(lines)
   return nil
 end
 
+local plan_turns = 0
+
 local function build_plan_message()
   local input = {}
   ctx.with_agent_instructions(input, "plan")
@@ -419,7 +421,7 @@ local function build_plan_message()
   return table.concat(input, "\n")
 end
 
-local function plan_send(question)
+local function plan_send_rpc(question)
   local workbench = ctx.get_or_create_workbench()
   if question then
     vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", question, "" })
@@ -430,6 +432,74 @@ local function plan_send(question)
   if not rpc.ensure_started(workbench, config.pi_rpc_cmd()) then return end
   local message = build_plan_message()
   if rpc.is_busy() then rpc.steer(message) else rpc.prompt(message) end
+end
+
+local function plan_send_raw(question)
+  local workbench = ctx.get_or_create_workbench()
+  if question then
+    plan_turns = 0
+    vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", question, "" })
+  end
+  ctx.show_workbench()
+
+  local input = {}
+  ctx.with_system(input)
+  ctx.with_scope_contract(input)
+  ctx.with_tools(input)
+  ctx.with_quickfix(input)
+  ctx.with_workbench(input)
+  ctx.with_visible(input)
+
+  stream.to_buf(input, workbench, {
+    raw = true,
+    on_done = function()
+      if not vim.api.nvim_buf_is_valid(workbench) then return end
+      local all = vim.api.nvim_buf_get_lines(workbench, 0, -1, false)
+      local name, args, line_idx = parse_tool_call(all)
+      if not name then
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
+        return
+      end
+      vim.api.nvim_buf_set_lines(workbench, line_idx - 1, line_idx, false, { "🔧 " .. name .. "(" .. args .. ")" })
+      plan_turns = (plan_turns or 0) + 1
+      if plan_turns > 5 then
+        plan_turns = 0
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool limit reached (5 turns) ---", "", "---", "", "" })
+        vim.notify("cogcog: tool turn limit reached", vim.log.levels.WARN)
+        return
+      end
+      local mode = vim.g.cogcog_tool_mode or "ask"
+      local auto = (mode == "trust") or (mode == "read" and is_read_only_tool(name))
+      local function run_tool()
+        local result = execute_tool(name, args)
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " ---", "" })
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
+        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
+        stream._scroll_buf(workbench)
+        plan_send_raw(nil)
+      end
+      if auto then
+        run_tool()
+      else
+        vim.ui.select({ "y — execute", "n — skip" }, { prompt = "🔧 " .. name .. "(" .. args .. ")" }, function(choice)
+          if not vim.api.nvim_buf_is_valid(workbench) then return end
+          if choice and choice:match("^y") then run_tool() else
+            plan_turns = 0
+            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " (skipped) ---", "", "---", "", "" })
+            stream._scroll_buf(workbench)
+          end
+        end)
+      end
+    end,
+  })
+end
+
+local function plan_send(question)
+  local rpc = require("cogcog.pi_rpc")
+  local socket = config.pi_socket_path()
+  local has_companion = rpc.using_socket() or ((vim.uv or vim.loop) and (vim.uv or vim.loop).fs_stat(socket) ~= nil)
+  if has_companion then return plan_send_rpc(question) end
+  return plan_send_raw(question)
 end
 
 -- exec (gx): cloud agent, anchored by workbench + visible state
@@ -1524,6 +1594,56 @@ vim.keymap.set("n", "<leader>cc", function()
   vim.fn.delete(config.legacy_session_file)
   vim.notify("🗑 workbench cleared")
 end, { desc = "cogcog: clear workbench" })
+
+local function socket_exists()
+  local uv = vim.uv or vim.loop
+  local socket = config.pi_socket_path()
+  return socket ~= "" and uv and uv.fs_stat(socket) ~= nil
+end
+
+local function open_harness()
+  local buf = vim.api.nvim_create_buf(false, true)
+  local win = ctx.make_split(true, buf, " 🧵 harness │ q close")
+  vim.api.nvim_set_current_win(win)
+  vim.fn.termopen({ config.harness_bin(), "--socket", config.pi_socket_path() }, {
+    on_exit = function(_, code)
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_set_option_value("statusline", " 🧵 harness │ exited " .. tostring(code), { win = win })
+        end
+      end)
+    end,
+  })
+  vim.cmd("startinsert")
+end
+
+vim.api.nvim_create_user_command("CogcogHarness", open_harness, { desc = "Open companion harness terminal" })
+
+vim.api.nvim_create_user_command("CogcogDetach", function()
+  local rpc = require("cogcog.pi_rpc")
+  if rpc.detach() then
+    vim.notify("cogcog: detached local pi session")
+  else
+    vim.notify("cogcog: no active pi session", vim.log.levels.INFO)
+  end
+end, { desc = "Detach local pi RPC channel" })
+
+vim.api.nvim_create_user_command("CogcogCompanionStop", function()
+  local rpc = require("cogcog.pi_rpc")
+  if rpc.stop_companion() then
+    vim.notify("cogcog: companion harness stopped")
+  else
+    vim.notify("cogcog: no companion harness socket", vim.log.levels.INFO)
+  end
+end, { desc = "Stop companion harness broker" })
+
+vim.api.nvim_create_user_command("CogcogCompanionStatus", function()
+  local rpc = require("cogcog.pi_rpc")
+  local mode = rpc.using_socket() and "attached" or (rpc.started() and "direct" or "idle")
+  local socket = vim.fn.fnamemodify(config.pi_socket_path(), ":.")
+  local companion = socket_exists() and "present" or "missing"
+  vim.notify("cogcog: companion socket " .. companion .. " (" .. socket .. "), rpc " .. mode)
+end, { desc = "Show companion harness status" })
 
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
   local rpc = require("cogcog.pi_rpc")

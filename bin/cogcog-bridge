@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+import argparse, json, os, shlex, signal, socket, socketserver, subprocess, threading, uuid
+
+state = {"clients": {}, "lock": threading.Lock(), "active_ui": None, "pi": None, "server": None, "socket": None, "stopping": False, "shutdown": None}
+
+
+def send_pi(obj):
+    state["pi"].stdin.write(json.dumps(obj) + "\n")
+    state["pi"].stdin.flush()
+
+
+def broadcast(obj, only=None):
+    targets = [] if only else list(state["clients"].values())
+    if only and only in state["clients"]:
+        targets = [state["clients"][only]]
+    line = (json.dumps(obj) + "\n").encode()
+    dead = []
+    for handler in targets:
+        try:
+            with handler.send_lock:
+                handler.wfile.write(line)
+                handler.wfile.flush()
+        except Exception:
+            dead.append(handler.client_id)
+    for client_id in dead:
+        state["clients"].pop(client_id, None)
+
+
+def choose_ui():
+    active = state["active_ui"]
+    if active in state["clients"] and getattr(state["clients"][active], "ui", False):
+        return active
+    for client_id, handler in state["clients"].items():
+        if getattr(handler, "ui", False):
+            return client_id
+
+
+def handle_pi(stream_name):
+    for raw in getattr(state["pi"], stream_name):
+        line = raw.strip()
+        if not line:
+            continue
+        if stream_name == "stderr":
+            broadcast({"type": "broker_notice", "message": line})
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            broadcast({"type": "broker_notice", "message": line})
+            continue
+        if obj.get("type") == "extension_ui_request":
+            ui_client = choose_ui()
+            if ui_client:
+                broadcast(obj, only=ui_client)
+            else:
+                send_pi({"type": "extension_ui_response", "id": obj.get("id"), "cancelled": True})
+            continue
+        if obj.get("type") == "agent_end":
+            state["active_ui"] = None
+        broadcast(obj)
+
+
+class Handler(socketserver.StreamRequestHandler):
+    def setup(self):
+        super().setup()
+        self.client_id = uuid.uuid4().hex[:8]
+        self.ui = False
+        self.send_lock = threading.Lock()
+        state["clients"][self.client_id] = self
+
+    def handle(self):
+        for raw in self.rfile:
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            if obj.get("type") == "broker_hello":
+                self.ui = bool(obj.get("ui"))
+                continue
+            if obj.get("type") == "broker_shutdown":
+                if state["shutdown"]:
+                    state["shutdown"]()
+                return
+            if obj.get("type") in {"prompt", "steer", "follow_up"}:
+                state["active_ui"] = self.client_id
+            send_pi(obj)
+
+    def finish(self):
+        state["clients"].pop(getattr(self, "client_id", ""), None)
+        if state["active_ui"] == getattr(self, "client_id", None):
+            state["active_ui"] = None
+        super().finish()
+
+
+class Server(socketserver.ThreadingUnixStreamServer):
+    allow_reuse_address = True
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    default_socket = os.environ.get("COGCOG_PI_SOCKET", os.path.join(os.getcwd(), ".cogcog", "pi-bridge.sock"))
+    parser.add_argument("--socket", default=default_socket)
+    parser.add_argument("cmd", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not cmd:
+        cmd = shlex.split(os.environ.get("COGCOG_PI_RPC_CMD", "pi --mode rpc --no-session"))
+
+    os.makedirs(os.path.dirname(args.socket), exist_ok=True)
+    if os.path.exists(args.socket):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(args.socket)
+            print(args.socket)
+            return 0
+        except OSError:
+            os.unlink(args.socket)
+    state["pi"] = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    for name in ("stdout", "stderr"):
+        threading.Thread(target=handle_pi, args=(name,), daemon=True).start()
+    server = Server(args.socket, Handler)
+    state["server"] = server
+    state["socket"] = args.socket
+
+    def shutdown(*_):
+        if state["stopping"]:
+            return
+        state["stopping"] = True
+        try:
+            state["server"].server_close()
+        except Exception:
+            pass
+        try:
+            os.unlink(state["socket"])
+        except FileNotFoundError:
+            pass
+        try:
+            if state["pi"] and state["pi"].poll() is None:
+                state["pi"].terminate()
+        except Exception:
+            pass
+        os._exit(0)
+
+    state["shutdown"] = shutdown
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, shutdown)
+    print(args.socket)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

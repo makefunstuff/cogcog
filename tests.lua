@@ -203,6 +203,12 @@ test("config resolves bundled cogcog binary when available", function()
   end
 end)
 
+test("config resolves companion binaries", function()
+  local config = require("cogcog.config")
+  assert_true(type(config.bridge_bin()) == "string" and config.bridge_bin() ~= "")
+  assert_true(type(config.harness_bin()) == "string" and config.harness_bin() ~= "")
+end)
+
 test("checker_cmd falls back to bundled raw path", function()
   local config = require("cogcog.config")
   local old = vim.env.COGCOG_CHECKER
@@ -227,8 +233,19 @@ test("pi_rpc_cmd has a default", function()
   vim.env.COGCOG_PI_RPC_CMD = old
 end)
 
+test("pi_socket_path has a default", function()
+  local config = require("cogcog.config")
+  local old = vim.env.COGCOG_PI_SOCKET
+  vim.env.COGCOG_PI_SOCKET = nil
+  assert_true(config.pi_socket_path():match("%.cogcog/pi%-bridge%.sock$") ~= nil)
+  vim.env.COGCOG_PI_SOCKET = old
+end)
+
 test("pi rpc modules load", function()
-  assert_true(type(require("cogcog.pi_rpc").is_busy) == "function")
+  local rpc = require("cogcog.pi_rpc")
+  assert_true(type(rpc.is_busy) == "function")
+  assert_true(type(rpc.detach) == "function")
+  assert_true(type(rpc.stop_companion) == "function")
   assert_true(type(require("cogcog.pi_rpc_ui").handle) == "function")
 end)
 

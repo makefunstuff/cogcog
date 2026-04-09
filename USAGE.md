@@ -75,6 +75,28 @@ Set `COGCOG_PI_RPC_CMD` if you want a different pi/provider/model command.
 Activity streams into the workbench. Prompt anchors come from visible windows, quickfix, and the workbench. If pi is already running for the current workbench turn, a new `<leader>gx` steers the active run instead of starting over.
 If pi requests UI, Cogcog uses native Neovim surfaces: `vim.ui.select()` / `vim.ui.input()` for prompts and a temporary split for multi-line editor requests.
 
+### Optional companion harness
+
+Current workflow stays unchanged by default.
+If you want a separate terminal harness that shares the same live pi RPC session as Neovim, start:
+
+```bash
+bin/cogcog-harness
+```
+
+This starts or attaches to `.cogcog/pi-bridge.sock`.
+When that socket exists, Neovim auto-attaches to it; otherwise it falls back to spawning pi directly.
+Use `COGCOG_PI_SOCKET` to override the socket path.
+
+Useful Neovim commands:
+
+```vim
+:CogcogHarness          " open an embedded harness terminal
+:CogcogCompanionStatus  " show companion socket / RPC mode
+:CogcogCompanionStop    " stop the broker
+:CogcogDetach           " detach the current local pi channel
+```
+
 ### Discover project
 
 ```text

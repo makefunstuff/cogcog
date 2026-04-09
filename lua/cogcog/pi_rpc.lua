@@ -2,10 +2,13 @@ local config = require("cogcog.config")
 local stream = require("cogcog.stream")
 local ui = require("cogcog.pi_rpc_ui")
 
-local M = { job = nil, buf = nil, busy = false, partial = "", seq = 0, changed = {}, ui = {}, current_text = false }
+local uv = vim.uv or vim.loop
+local M = { chan = nil, kind = nil, buf = nil, busy = false, partial = "", seq = 0, changed = {}, ui = {}, current_text = false, stopping = false }
 
 local function running()
-  return type(M.job) == "number" and M.job > 0 and vim.fn.jobwait({ M.job }, 0)[1] == -1
+  if type(M.chan) ~= "number" or M.chan <= 0 then return false end
+  if M.kind == "job" then return vim.fn.jobwait({ M.chan }, 0)[1] == -1 end
+  return pcall(vim.api.nvim_get_chan_info, M.chan)
 end
 
 local function notify(msg, level)
@@ -33,11 +36,28 @@ local function append_text(text)
   end)
 end
 
+local function reset_state()
+  M.busy, M.partial, M.changed, M.ui, M.current_text, M.stopping = false, "", {}, {}, false, false
+end
+
+local function close_local()
+  local chan, kind = M.chan, M.kind
+  M.chan, M.kind = nil, nil
+  reset_state()
+  if type(chan) ~= "number" or chan <= 0 then return end
+  if kind == "job" then
+    M.stopping = true
+    pcall(vim.fn.jobstop, chan)
+  else
+    pcall(vim.fn.chanclose, chan)
+  end
+end
+
 local function send(obj)
   if not running() then return notify("cogcog: pi rpc is not running", vim.log.levels.ERROR) end
   M.seq = M.seq + 1
   obj.id = obj.id or ("cogcog-rpc-" .. M.seq)
-  vim.fn.chansend(M.job, vim.json.encode(obj) .. "\n")
+  vim.fn.chansend(M.chan, vim.json.encode(obj) .. "\n")
   return true
 end
 
@@ -66,10 +86,6 @@ local function tool_target(args)
   return " " .. value
 end
 
-local function handle_ui(req)
-  ui.handle(req, send, notify, append_lines, M.ui)
-end
-
 local function message_text(msg)
   local out = {}
   for _, part in ipairs((msg or {}).content or {}) do
@@ -86,10 +102,10 @@ local function handle(line)
   elseif obj.type == "agent_start" then
     M.busy, M.current_text = true, false
   elseif obj.type == "agent_end" then
-    M.busy = false; refresh_changed()
+    M.busy = false
+    refresh_changed()
   elseif obj.type == "message_start" then
-    local msg = obj.message or {}
-    if msg.role == "assistant" then M.current_text = false end
+    if (obj.message or {}).role == "assistant" then M.current_text = false end
   elseif obj.type == "message_update" then
     local ev = obj.assistantMessageEvent or {}
     if ev.type == "text_delta" then M.current_text = true; append_text(ev.delta or "") end
@@ -108,45 +124,87 @@ local function handle(line)
     if (name == "edit" or name == "write") and type(args.path) == "string" then M.changed[args.path] = true end
     if obj.isError then append_lines({ "", "✗ " .. name, "" }) end
   elseif obj.type == "extension_ui_request" then
-    handle_ui(obj)
+    ui.handle(obj, send, notify, append_lines, M.ui)
   end
 end
 
-function M.ensure_started(buf, cmd)
-  M.buf = buf
-  if running() then return true end
-  M.busy, M.partial, M.changed, M.ui, M.current_text = false, "", {}, {}, false
-  local job = vim.fn.jobstart({ "bash", "-c", cmd or config.pi_rpc_cmd() }, {
+local function feed(data)
+  local text = table.concat(data or {}, "\n")
+  if text == "" then return end
+  M.partial = M.partial .. text
+  while true do
+    local nl = M.partial:find("\n", 1, true)
+    if not nl then break end
+    local line = M.partial:sub(1, nl - 1):gsub("\r$", "")
+    M.partial = M.partial:sub(nl + 1)
+    if line ~= "" then handle(line) end
+  end
+end
+
+local function connect_socket(path)
+  local chan = vim.fn.sockconnect("pipe", path, { on_data = function(_, data) feed(data) end, data_buffered = false })
+  if type(chan) ~= "number" or chan <= 0 then return false end
+  M.chan, M.kind = chan, "socket"
+  send({ type = "broker_hello", client = "nvim", ui = true })
+  notify("cogcog: attached to companion harness")
+  return true
+end
+
+local function send_socket(path, obj)
+  local chan = vim.fn.sockconnect("pipe", path, { on_data = function() end, data_buffered = false })
+  if type(chan) ~= "number" or chan <= 0 then return false end
+  vim.fn.chansend(chan, vim.json.encode(obj) .. "\n")
+  vim.defer_fn(function() pcall(vim.fn.chanclose, chan) end, 50)
+  return true
+end
+
+local function spawn_pi(cmd)
+  local chan = vim.fn.jobstart({ "bash", "-c", cmd or config.pi_rpc_cmd() }, {
     stdout_buffered = false,
-    on_stdout = function(_, data)
-      local text = table.concat(data or {}, "\n")
-      if text == "" then return end
-      M.partial = M.partial .. text
-      while true do
-        local nl = M.partial:find("\n", 1, true)
-        if not nl then break end
-        local line = M.partial:sub(1, nl - 1):gsub("\r$", "")
-        M.partial = M.partial:sub(nl + 1)
-        if line ~= "" then handle(line) end
-      end
-    end,
+    on_stdout = function(_, data) feed(data) end,
     on_stderr = function(_, data)
       local msg = vim.trim(table.concat(data or {}, "\n"))
       if msg ~= "" then notify("pi rpc: " .. msg:sub(1, 200), vim.log.levels.WARN) end
     end,
     on_exit = function(_, code)
-      M.job, M.busy, M.partial, M.changed, M.ui, M.current_text = nil, false, "", {}, {}, false
-      if code ~= 0 then notify("cogcog: pi rpc exited " .. code, vim.log.levels.ERROR) end
+      local stopping = M.stopping
+      M.chan, M.kind = nil, nil
+      reset_state()
+      if code ~= 0 and not stopping then notify("cogcog: pi rpc exited " .. code, vim.log.levels.ERROR) end
     end,
   })
-  if type(job) ~= "number" or job <= 0 then return notify("cogcog: failed to start pi rpc", vim.log.levels.ERROR) end
-  M.job = job
+  if type(chan) ~= "number" or chan <= 0 then return notify("cogcog: failed to start pi rpc", vim.log.levels.ERROR) end
+  M.chan, M.kind = chan, "job"
   return true
 end
 
+function M.ensure_started(buf, cmd)
+  M.buf = buf
+  if running() then return true end
+  reset_state()
+  local socket = config.pi_socket_path()
+  if socket ~= "" and uv and uv.fs_stat(socket) and connect_socket(socket) then return true end
+  return spawn_pi(cmd)
+end
+
+function M.started() return running() end
+function M.using_socket() return M.kind == "socket" and running() end
 function M.is_busy() return M.busy end
+function M.detach()
+  if not running() then return false end
+  close_local()
+  return true
+end
+function M.stop_companion()
+  local socket = config.pi_socket_path()
+  local had_socket = socket ~= "" and uv and uv.fs_stat(socket) ~= nil
+  if had_socket then send_socket(socket, { type = "broker_shutdown" }) end
+  if M.kind == "socket" then close_local() end
+  return had_socket
+end
 function M.prompt(message) if send({ type = "prompt", message = message }) then M.busy = true end end
 function M.steer(message) send({ type = "steer", message = message }) end
+function M.follow_up(message) send({ type = "follow_up", message = message }) end
 function M.abort() if M.busy then send({ type = "abort" }) end end
 
 return M

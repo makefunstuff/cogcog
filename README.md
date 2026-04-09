@@ -122,6 +122,25 @@ The model gets up to 5 tool turns per question, then stops.
 <C-g> → "what failed?"             ask about the output
 ```
 
+Optional companion harness:
+
+```bash
+bin/cogcog-harness
+```
+
+This keeps the current editor-native flow intact, but adds a second terminal UI
+that can share the same live pi RPC session with Neovim through
+`.cogcog/pi-bridge.sock`.
+
+Useful commands inside Neovim:
+
+```vim
+:CogcogHarness          " open an embedded harness terminal
+:CogcogCompanionStatus  " show socket/attach state
+:CogcogCompanionStop    " stop the broker
+:CogcogDetach           " detach Neovim from the current pi channel
+```
+
 ### 7. Batch (quickfix)
 
 ```vim

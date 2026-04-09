@@ -51,6 +51,15 @@ DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
                 Set COGCOG_PI_RPC_CMD to override provider/model.
                 Repeated use while pi is active sends a steering turn.
                 UI requests use vim.ui and a temporary editor split.
+                If `.cogcog/pi-bridge.sock` exists, Cogcog attaches to the
+                companion harness instead of spawning pi directly.
+
+USER COMMANDS                                    *cogcog-commands*
+
+:CogcogHarness          Open an embedded harness terminal.
+:CogcogCompanionStatus  Show socket/attach state.
+:CogcogCompanionStop    Stop the companion broker.
+:CogcogDetach           Detach the current local pi channel.
 
                                                 *cogcog-cd*
 <leader>cd      Discover project. Writes .cogcog/discovery.md
@@ -151,6 +160,12 @@ COGCOG_PI_RPC_CMD   Optional pi RPC command for <leader>gx.
 COGCOG_CHECKER      Optional stronger command for check/discover.
                 When unset, check/discover fall back to cogcog --raw.
 
+                                                *cogcog-pi-socket*
+COGCOG_PI_SOCKET    Optional companion harness socket path.
+                Default: `.cogcog/pi-bridge.sock`.
+                When present and connectable, gx / workbench pi-RPC flows
+                attach to the shared harness session.
+
                                                 *cogcog-backend*
 COGCOG_BACKEND      "anthropic", "openai", "codex", "copilot", or "pi"
                 (default: anthropic)
@@ -182,6 +197,14 @@ PROJECT FILES                                   *cogcog-project*
 .cogcog/system.md       System prompt. Shared by all verbs.
 .cogcog/workbench.md    Auto-saved/restored workbench.
 .cogcog/discovery.md    Project map.
+.cogcog/pi-bridge.sock  Optional companion harness socket.
+
+Companion harness:
+>
+    bin/cogcog-bridge   start shared pi RPC broker
+    bin/cogcog-harness  start/attach terminal harness client
+    :CogcogHarness      open embedded harness terminal
+<
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 

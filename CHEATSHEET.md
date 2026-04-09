@@ -63,6 +63,7 @@ dap                         delete section
 ```text
 COGCOG_FAST_MODEL   ga/gs/<C-g>/<leader>gr: fast model for bundled transport
 COGCOG_PI_RPC_CMD   <leader>gx: override pi RPC command/provider/model
+COGCOG_PI_SOCKET    optional companion harness socket (default: .cogcog/pi-bridge.sock)
 COGCOG_CHECKER      <leader>gc/<leader>cd: optional stronger review/discovery command
 ```
 
@@ -77,4 +78,8 @@ gd → gaip           definition → explain
 <leader>g.          review changes
 gsip → <leader>gcip generate → verify
 <C-g> → <leader>gx  plan → pi RPC execute
+bin/cogcog-harness  optional shared terminal harness
+:CogcogHarness      open embedded harness terminal
+:CogcogCompanionStop stop companion broker
+:CogcogDetach       detach current local pi channel
 ```

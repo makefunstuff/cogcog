@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+import argparse, json, os, select, socket, subprocess, sys, tempfile, time
+
+
+def send(sock, obj):
+    sock.sendall((json.dumps(obj) + "\n").encode())
+
+
+def read_editor(prefill):
+    editor = os.environ.get("EDITOR") or "vi"
+    fd, path = tempfile.mkstemp(prefix="cogcog-", suffix=".md")
+    os.write(fd, prefill.encode())
+    os.close(fd)
+    subprocess.call([editor, path])
+    text = open(path).read()
+    os.unlink(path)
+    return text
+
+
+def start_bridge(socket_path):
+    bridge = os.path.join(os.path.dirname(__file__), "cogcog-bridge")
+    cmd = [bridge, "--socket", socket_path]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(40):
+        if os.path.exists(socket_path):
+            return
+        time.sleep(0.1)
+    raise SystemExit("bridge did not start")
+
+
+def handle_ui(sock, obj):
+    method = obj.get("method")
+    if method == "select":
+        print(f"\n{obj.get('title','Select')}")
+        options = obj.get("options") or []
+        for i, opt in enumerate(options, 1):
+            print(f"  {i}. {opt}")
+        choice = input("> ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return send(sock, {"type": "extension_ui_response", "id": obj["id"], "value": options[int(choice) - 1]})
+        return send(sock, {"type": "extension_ui_response", "id": obj["id"], "cancelled": True})
+    if method == "confirm":
+        answer = input(f"\n{obj.get('title','Confirm')}: {obj.get('message','')} [y/N] ").strip().lower()
+        return send(sock, {"type": "extension_ui_response", "id": obj["id"], "confirmed": answer in {"y", "yes"}})
+    if method == "input":
+        value = input(f"\n{obj.get('title','Input')}: ")
+        return send(sock, {"type": "extension_ui_response", "id": obj["id"], "value": value} if value else {"type": "extension_ui_response", "id": obj["id"], "cancelled": True})
+    if method == "editor":
+        value = read_editor(obj.get("prefill", ""))
+        return send(sock, {"type": "extension_ui_response", "id": obj["id"], "value": value})
+    if method == "notify":
+        print(f"\n! {obj.get('message','')}")
+    elif method == "setStatus" and obj.get("statusText"):
+        print(f"\n[{obj.get('statusKey','pi')}] {obj['statusText']}")
+    elif method == "setWidget" and obj.get("widgetLines"):
+        print()
+        print("\n".join(obj["widgetLines"]))
+    elif method == "set_editor_text":
+        print(f"\n[prefill] {obj.get('text','')}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    default_socket = os.environ.get("COGCOG_PI_SOCKET", os.path.join(os.getcwd(), ".cogcog", "pi-bridge.sock"))
+    parser.add_argument("--socket", default=default_socket)
+    parser.add_argument("--no-start", action="store_true")
+    args = parser.parse_args()
+    if not os.path.exists(args.socket):
+        if args.no_start:
+            raise SystemExit(f"missing socket: {args.socket}")
+        start_bridge(args.socket)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(args.socket)
+    sock.setblocking(False)
+    send(sock, {"type": "broker_hello", "client": "tty", "ui": True})
+    busy, partial, buf = False, False, ""
+    print("cogcog harness connected. /quit /abort /follow TEXT /steer TEXT")
+    while True:
+        r, _, _ = select.select([sock, sys.stdin], [], [])
+        if sys.stdin in r:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            text = line.rstrip("\n")
+            if not text:
+                continue
+            if text == "/quit":
+                break
+            elif text == "/abort":
+                send(sock, {"type": "abort"})
+            elif text.startswith("/follow "):
+                send(sock, {"type": "follow_up", "message": text[8:]})
+            elif text.startswith("/steer "):
+                send(sock, {"type": "steer", "message": text[7:]})
+            elif text.startswith("/prompt "):
+                send(sock, {"type": "prompt", "message": text[8:]})
+            else:
+                send(sock, {"type": "steer" if busy else "prompt", "message": text})
+        if sock in r:
+            chunk = sock.recv(65536).decode()
+            if not chunk:
+                break
+            buf += chunk
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                if not line:
+                    continue
+                obj = json.loads(line)
+                t = obj.get("type")
+                if t == "agent_start":
+                    busy, partial = True, False
+                    print()
+                elif t == "agent_end":
+                    busy = False
+                    print("\n---")
+                elif t == "message_update":
+                    ev = obj.get("assistantMessageEvent") or {}
+                    if ev.get("type") == "text_delta":
+                        partial = True
+                        print(ev.get("delta", ""), end="", flush=True)
+                elif t == "message_end":
+                    msg = obj.get("message") or {}
+                    if msg.get("role") == "assistant" and msg.get("stopReason") == "error":
+                        print(f"\n✗ {msg.get('errorMessage','error')}")
+                    elif msg.get("role") == "assistant" and not partial:
+                        text = "\n".join(part.get("text", "") for part in msg.get("content", []) if part.get("type") == "text")
+                        if text:
+                            print(text)
+                elif t == "tool_execution_start":
+                    args = obj.get("args") or {}
+                    target = args.get("path") or args.get("command") or ""
+                    print(f"\n🔧 {obj.get('toolName','tool')} {target}".rstrip())
+                elif t == "tool_execution_end" and obj.get("isError"):
+                    print(f"\n✗ {obj.get('toolName','tool')}")
+                elif t == "extension_ui_request":
+                    handle_ui(sock, obj)
+                elif t == "broker_notice":
+                    print(f"\n! {obj.get('message','')}")
+    sock.close()
+
+
+if __name__ == "__main__":
+    main()

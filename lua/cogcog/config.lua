@@ -10,9 +10,13 @@ local function repo_root()
   return vim.fn.fnamemodify(module_source_path(), ":h:h:h")
 end
 
-local function bundled_cogcog_bin()
-  local path = repo_root() .. "/bin/cogcog"
+local function bundled_bin(name)
+  local path = repo_root() .. "/bin/" .. name
   if vim.fn.executable(path) == 1 then return path end
+end
+
+local function bundled_cogcog_bin()
+  return bundled_bin("cogcog")
 end
 
 M.cogcog_dir = vim.fn.getcwd() .. "/.cogcog"
@@ -45,6 +49,21 @@ function M.pi_rpc_cmd()
     return vim.env.COGCOG_PI_RPC_CMD
   end
   return "pi --mode rpc --no-session"
+end
+
+function M.pi_socket_path()
+  if vim.env.COGCOG_PI_SOCKET and vim.trim(vim.env.COGCOG_PI_SOCKET) ~= "" then
+    return vim.env.COGCOG_PI_SOCKET
+  end
+  return M.cogcog_dir .. "/pi-bridge.sock"
+end
+
+function M.bridge_bin()
+  return bundled_bin("cogcog-bridge") or (vim.fn.exepath("cogcog-bridge") ~= "" and vim.fn.exepath("cogcog-bridge")) or "cogcog-bridge"
+end
+
+function M.harness_bin()
+  return bundled_bin("cogcog-harness") or (vim.fn.exepath("cogcog-harness") ~= "" and vim.fn.exepath("cogcog-harness")) or "cogcog-harness"
 end
 
 function M.kb_path()
