@@ -164,4 +164,54 @@ function M.goto_file(args_json)
   return vim.json.encode({ ok = true, path = args.path, line = args.line })
 end
 
+--- Set quickfix list. JSON arg: {"items":[{"filename":"f","lnum":1,"text":"msg"},...], "title":"..."}
+--- Items can also have "col" and "type" ("E","W","I","H").
+function M.set_quickfix(args_json)
+  local args = vim.json.decode(args_json)
+  local items = args.items or {}
+  vim.schedule(function()
+    local qf = {}
+    for _, item in ipairs(items) do
+      table.insert(qf, {
+        filename = item.filename,
+        lnum = item.lnum or 1,
+        col = item.col or 0,
+        text = item.text or "",
+        type = item.type or "",
+      })
+    end
+    vim.fn.setqflist({}, " ", {
+      title = args.title or "pi",
+      items = qf,
+    })
+    if #qf > 0 then vim.cmd("copen") end
+  end)
+  return vim.json.encode({ ok = true, count = #items })
+end
+
+--- Run a vim command. JSON arg: {"cmd":"make","silent":true}
+function M.exec(args_json)
+  local args = vim.json.decode(args_json)
+  local output = ""
+  vim.schedule(function()
+    local ok, err = pcall(function()
+      output = vim.api.nvim_exec2(args.cmd, { output = true }).output or ""
+    end)
+    if not ok then
+      vim.notify("cogcog bridge exec error: " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end)
+  return vim.json.encode({ ok = true, cmd = args.cmd })
+end
+
+--- Send a notification. JSON arg: {"msg":"done","level":"info"}
+function M.notify(args_json)
+  local args = vim.json.decode(args_json)
+  local levels = { error = vim.log.levels.ERROR, warn = vim.log.levels.WARN, info = vim.log.levels.INFO }
+  vim.schedule(function()
+    vim.notify(args.msg or "", levels[args.level] or vim.log.levels.INFO)
+  end)
+  return vim.json.encode({ ok = true })
+end
+
 return M

@@ -226,6 +226,9 @@ test("bridge module loads", function()
   assert_true(type(bridge.get_buffer) == "function")
   assert_true(type(bridge.get_buffers) == "function")
   assert_true(type(bridge.goto_file) == "function")
+  assert_true(type(bridge.set_quickfix) == "function")
+  assert_true(type(bridge.exec) == "function")
+  assert_true(type(bridge.notify) == "function")
 end)
 
 -- Test with_quickfix

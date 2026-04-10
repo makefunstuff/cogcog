@@ -217,6 +217,82 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "nvim_quickfix",
+    label: "Neovim Quickfix",
+    description:
+      "Set the quickfix list in the user's Neovim. Items appear in the quickfix window and can be navigated with :cnext/:cprev or Telescope. Use this to send findings (TODOs, issues, locations) to the editor.",
+    parameters: Type.Object({
+      title: Type.Optional(Type.String({ description: "Quickfix list title" })),
+      items: Type.Array(
+        Type.Object({
+          filename: Type.String({ description: "File path (relative to cwd)" }),
+          lnum: Type.Number({ description: "Line number" }),
+          text: Type.String({ description: "Description" }),
+          col: Type.Optional(Type.Number({ description: "Column number" })),
+          type: Type.Optional(
+            Type.String({ description: "Type: E(rror), W(arning), I(nfo), H(int)" })
+          ),
+        }),
+        { description: "Quickfix items" }
+      ),
+    }),
+    async execute(_id, params) {
+      const result = await nvimCall("set_quickfix", {
+        title: params.title || "pi",
+        items: params.items,
+      });
+      if (!result) throw new Error(`Neovim not reachable at ${socketPath}`);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Set ${params.items.length} items in quickfix${params.title ? ` (${params.title})` : ""}`,
+          },
+        ],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nvim_exec",
+    label: "Neovim Command",
+    description:
+      "Run a vim command in the user's Neovim (e.g. :make, :write, :grep). Use for triggering builds, saves, or other editor actions.",
+    parameters: Type.Object({
+      cmd: Type.String({ description: "Vim command to execute (without leading :)" }),
+    }),
+    async execute(_id, params) {
+      const result = await nvimCall("exec", { cmd: params.cmd });
+      if (!result) throw new Error(`Neovim not reachable at ${socketPath}`);
+      return {
+        content: [{ type: "text" as const, text: `Executed :${params.cmd}` }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nvim_notify",
+    label: "Neovim Notify",
+    description:
+      "Send a notification to the user's Neovim editor.",
+    parameters: Type.Object({
+      msg: Type.String({ description: "Notification message" }),
+      level: Type.Optional(
+        Type.String({ description: "Level: error, warn, info (default: info)" })
+      ),
+    }),
+    async execute(_id, params) {
+      await nvimCall("notify", { msg: params.msg, level: params.level || "info" });
+      return {
+        content: [{ type: "text" as const, text: `Notified: ${params.msg}` }],
+        details: {},
+      };
+    },
+  });
+
   // ── status on load ────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
