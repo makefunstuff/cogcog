@@ -219,28 +219,13 @@ test("agent_cmd is optional", function()
   vim.env.COGCOG_AGENT_CMD = old
 end)
 
-test("pi_rpc_cmd has a default", function()
-  local config = require("cogcog.config")
-  local old = vim.env.COGCOG_PI_RPC_CMD
-  vim.env.COGCOG_PI_RPC_CMD = nil
-  assert_equal(config.pi_rpc_cmd(), "pi --mode rpc --no-session")
-  vim.env.COGCOG_PI_RPC_CMD = old
-end)
-
-test("pi_socket_path has a default", function()
-  local config = require("cogcog.config")
-  local old = vim.env.COGCOG_PI_SOCKET
-  vim.env.COGCOG_PI_SOCKET = nil
-  assert_true(config.pi_socket_path():match("%.cogcog/pi%-bridge%.sock$") ~= nil)
-  vim.env.COGCOG_PI_SOCKET = old
-end)
-
-test("pi rpc modules load", function()
-  local rpc = require("cogcog.pi_rpc")
-  assert_true(type(rpc.is_busy) == "function")
-  assert_true(type(rpc.detach) == "function")
-  assert_true(type(rpc.stop_companion) == "function")
-  assert_true(type(require("cogcog.pi_rpc_ui").handle) == "function")
+test("bridge module loads", function()
+  local bridge = require("cogcog.bridge")
+  assert_true(type(bridge.get_context) == "function")
+  assert_true(type(bridge.get_diagnostics) == "function")
+  assert_true(type(bridge.get_buffer) == "function")
+  assert_true(type(bridge.get_buffers) == "function")
+  assert_true(type(bridge.goto_file) == "function")
 end)
 
 -- Test with_quickfix

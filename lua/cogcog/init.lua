@@ -3,6 +3,11 @@ local config = require("cogcog.config")
 local ctx = require("cogcog.context")
 local stream = require("cogcog.stream")
 
+-- Auto-start Neovim server for pi extension integration.
+-- pi extension connects via this socket to read editor state.
+local _cogcog_socket = vim.env.COGCOG_NVIM_SOCKET or "/tmp/cogcog.sock"
+pcall(vim.fn.serverstart, _cogcog_socket)
+
 -- ask (ga): stateless or workbench-aware, no prompt by default
 
 local ask_verbosity = {
@@ -421,20 +426,7 @@ local function build_plan_message()
   return table.concat(input, "\n")
 end
 
-local function plan_send_rpc(question)
-  local workbench = ctx.get_or_create_workbench()
-  if question then
-    vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", question, "" })
-  end
-  ctx.show_workbench()
-
-  local rpc = require("cogcog.pi_rpc")
-  if not rpc.ensure_started(workbench, config.pi_rpc_cmd()) then return end
-  local message = build_plan_message()
-  if rpc.is_busy() then rpc.steer(message) else rpc.prompt(message) end
-end
-
-local function plan_send_raw(question)
+local function plan_send(question)
   local workbench = ctx.get_or_create_workbench()
   if question then
     plan_turns = 0
@@ -476,7 +468,7 @@ local function plan_send_raw(question)
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
         vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
         stream._scroll_buf(workbench)
-        plan_send_raw(nil)
+        plan_send(nil)
       end
       if auto then
         run_tool()
@@ -492,36 +484,6 @@ local function plan_send_raw(question)
       end
     end,
   })
-end
-
-local function plan_send(question)
-  local rpc = require("cogcog.pi_rpc")
-  local socket = config.pi_socket_path()
-  local has_companion = rpc.using_socket() or ((vim.uv or vim.loop) and (vim.uv or vim.loop).fs_stat(socket) ~= nil)
-  if has_companion then return plan_send_rpc(question) end
-  return plan_send_raw(question)
-end
-
--- exec (gx): cloud agent, anchored by workbench + visible state
-
-local function exec_send(instruction)
-  local workbench = ctx.get_or_create_workbench()
-
-  vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- exec: " .. instruction:sub(1, 50) .. " ---", "" })
-
-  local input = {}
-  ctx.with_agent_instructions(input, "exec")
-  ctx.with_scope_contract(input)
-  ctx.with_quickfix(input)
-  ctx.with_workbench(input)
-  ctx.with_visible(input)
-
-  ctx.show_workbench()
-
-  local rpc = require("cogcog.pi_rpc")
-  if not rpc.ensure_started(workbench, config.pi_rpc_cmd()) then return end
-  local message = table.concat(input, "\n")
-  if rpc.is_busy() then rpc.steer(message) else rpc.prompt(message) end
 end
 
 -- discover
@@ -1561,16 +1523,8 @@ vim.keymap.set("n", "<leader>gR", function()
 end, { desc = "cogcog: rewrite quickfix" })
 
 vim.keymap.set("n", "<leader>gx", function()
-  local cur_file = ctx.relative_name(vim.api.nvim_buf_get_name(0))
-  local hint = cur_file ~= "scratch" and " (in " .. cur_file .. ")" or ""
-  vim.ui.input({ prompt = " do" .. hint .. ": " }, function(instruction)
-    if not instruction or vim.trim(instruction) == "" then return end
-    if cur_file ~= "scratch" then
-      instruction = "[working in " .. cur_file .. "] " .. instruction
-    end
-    exec_send(instruction)
-  end)
-end, { desc = "cogcog: execute" })
+  vim.notify("cogcog: use pi in your other terminal for agent work", vim.log.levels.INFO)
+end, { desc = "cogcog: execute (use pi)" })
 
 vim.keymap.set("n", "<leader>cd", function()
   local f = config.discovery_file
@@ -1595,43 +1549,8 @@ vim.keymap.set("n", "<leader>cc", function()
   vim.notify("🗑 workbench cleared")
 end, { desc = "cogcog: clear workbench" })
 
-local function socket_exists()
-  local uv = vim.uv or vim.loop
-  local socket = config.pi_socket_path()
-  return socket ~= "" and uv and uv.fs_stat(socket) ~= nil
-end
-
-vim.api.nvim_create_user_command("CogcogDetach", function()
-  local rpc = require("cogcog.pi_rpc")
-  if rpc.detach() then
-    vim.notify("cogcog: detached local pi session")
-  else
-    vim.notify("cogcog: no active pi session", vim.log.levels.INFO)
-  end
-end, { desc = "Detach local pi RPC channel" })
-
-vim.api.nvim_create_user_command("CogcogCompanionStop", function()
-  local rpc = require("cogcog.pi_rpc")
-  if rpc.stop_companion() then
-    vim.notify("cogcog: companion harness stopped")
-  else
-    vim.notify("cogcog: no companion harness socket", vim.log.levels.INFO)
-  end
-end, { desc = "Stop companion harness broker" })
-
-vim.api.nvim_create_user_command("CogcogCompanionStatus", function()
-  local rpc = require("cogcog.pi_rpc")
-  local mode = rpc.using_socket() and "attached" or (rpc.started() and "direct" or "idle")
-  local socket = vim.fn.fnamemodify(config.pi_socket_path(), ":.")
-  local companion = socket_exists() and "present" or "missing"
-  vim.notify("cogcog: companion socket " .. companion .. " (" .. socket .. "), rpc " .. mode)
-end, { desc = "Show companion harness status" })
-
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
-  local rpc = require("cogcog.pi_rpc")
-  if rpc.is_busy() then
-    rpc.abort()
-  elseif next(stream.active_jobs) then
+  if next(stream.active_jobs) then
     stream.cancel_all()
   else
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-c>", true, false, true), "n", false)
