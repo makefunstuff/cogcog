@@ -60,42 +60,8 @@ Fast workbench synthesis. Shows current filename in the prompt when invoked from
 <leader>gcip        review this paragraph
 ```
 
-By default this uses the bundled Cogcog transport.
-Set `COGCOG_CHECKER` only if you explicitly want a different command for deeper review.
-
-### Execute with pi RPC
-
-```text
-<leader>gx → "refactor auth across all files"
-<leader>gx → "add tests for the parser module"
-```
-
-`<leader>gx` uses `pi --mode rpc --no-session` by default.
-Set `COGCOG_PI_RPC_CMD` if you want a different pi/provider/model command.
-Activity streams into the workbench. Prompt anchors come from visible windows, quickfix, and the workbench. If pi is already running for the current workbench turn, a new `<leader>gx` steers the active run instead of starting over.
-If pi requests UI, Cogcog uses native Neovim surfaces: `vim.ui.select()` / `vim.ui.input()` for prompts and a temporary split for multi-line editor requests.
-
-### Optional companion harness
-
-Current workflow stays unchanged by default.
-If you want a separate terminal harness that shares the same live pi RPC session as Neovim, start:
-
-```bash
-bin/cogcog-harness
-```
-
-This starts or attaches to `.cogcog/pi-bridge.sock`.
-When that socket exists, Neovim auto-attaches to it; otherwise it falls back to spawning pi directly.
-Use `COGCOG_PI_SOCKET` to override the socket path.
-Launch the harness in a separate terminal, not inside Neovim.
-
-Useful Neovim commands:
-
-```vim
-:CogcogCompanionStatus  " show companion socket / RPC mode
-:CogcogCompanionStop    " stop the broker
-:CogcogDetach           " detach the current local pi channel
-```
+Uses the bundled Cogcog transport.
+Set `COGCOG_CHECKER` only if you explicitly want a different command.
 
 ### Discover project
 
@@ -103,8 +69,7 @@ Useful Neovim commands:
 <leader>cd
 ```
 
-Discovery writes a project note you can navigate with `gf`.
-By default it uses the bundled Cogcog transport. Set `COGCOG_CHECKER` if you want a different review/discovery command.
+Discovery writes a project dashboard you can navigate with `gf`.
 
 ## Context from vim state
 
@@ -133,14 +98,10 @@ Edit some code, then:
 ```vim
 :make               " errors → quickfix
 gaip                " explain failure (quickfix auto-included)
-```
 
-```vim
 :lua vim.diagnostic.setqflist()     " LSP diagnostics
 gaip                                " explain
-```
 
-```vim
 :grep "TODO" src/**
 <leader>gq                          " summarize what is in quickfix
 <leader>gQ                          " review and prioritize quickfix items
@@ -154,11 +115,7 @@ Cogcog distinguishes between three kinds of context:
 - **explicit imports** — workbench contents, pinned snippets, command output you added
 - **soft context** — visible windows for grounding
 
-This keeps the common path bounded and predictable.
-
 ## Workbench flow
-
-Open the workbench when you want a persistent editable scratchpad:
 
 ```text
 <leader>co                open workbench
@@ -167,14 +124,6 @@ gaip                      explain with the workbench in play
 <leader>co                close → back to stateless operator flow
 ```
 
-Save a note manually if you want:
-
-```vim
-:w .cogcog/investigation.md
-```
-
-Pinned snippets, pasted docs, command output, and model responses can all live in the same workbench.
-
 ## Pin from multiple files
 
 ```vim
@@ -182,6 +131,51 @@ Pinned snippets, pasted docs, command output, and model responses can all live i
 " file B: visual select → <leader>gy
 <C-g> → "can these race?"
 ```
+
+## Pi integration (separate terminal)
+
+CogCog + pi = two terminals, one workflow.
+
+```text
+Terminal 1: nvim              fast verbs, editing, visual review
+Terminal 2: pi                agent work, multi-file changes
+```
+
+CogCog auto-starts `vim.fn.serverstart("/tmp/cogcog.sock")`.
+Pi connects via the cogcog extension and gets:
+
+- **Auto-injected context**: every prompt includes your buffer, cursor, windows, diagnostics
+- **5 tools**: `nvim_context`, `nvim_buffer`, `nvim_buffers`, `nvim_diagnostics`, `nvim_goto`
+- When pi edits files, Neovim autoread picks up changes
+
+Install:
+
+```bash
+ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+```
+
+CLI tool for scripts and agent skills:
+
+```bash
+nv status                   check connection
+nv context                  full editor state
+nv buffer [path]            read buffer content
+nv diagnostics [path]       LSP diagnostics
+nv goto <path> [line]       open file in Neovim
+nv eval <lua-expr>          arbitrary Lua
+```
+
+## Quickfix rewrite flow
+
+Build a deliberate target set first:
+
+```vim
+:grep "TODO" src/**
+<leader>gR
+```
+
+Prepares merged quickfix targets, opens review buffer with diffs.
+Press `a` to apply, `q` to reject.
 
 ## Generate → check loop
 
@@ -194,43 +188,7 @@ gsaf → "fix it"                            iterate
 <leader>gcaf                                verify with check
 ```
 
-## Quickfix rewrite flow
-
-Build a deliberate target set first, then prepare rewrites only for those targets:
-
-```vim
-:grep "TODO" src/**
-<leader>gR
-```
-
-Cogcog prepares merged quickfix target snippets in descending order per file, opens a review buffer with diffs, and applies only when you press `a`.
-The active quickfix list remains your navigation surface.
-
-## Multi-file agent work
-
-```text
-<leader>gx → "add input validation to all handlers"
-```
-
-Agent reads files, makes changes, and streams progress in the workbench:
-
-```text
-  → Read src/routes/users.ts
-  → Edit src/routes/users.ts
-  → Read src/routes/orders.ts
-  → Edit src/routes/orders.ts
-Done. 2 files modified.
-```
-
-Follow up:
-
-```text
-<C-g> → "also add to the admin routes"
-```
-
 ## Improve prompts over time
-
-Bad response:
 
 ```text
 <leader>cp → "it gave generic advice instead of reading the code"
@@ -245,22 +203,15 @@ Appends to `.cogcog/system.md`. Prompts improve per-project.
 :read .cogcog/review.md             " add review skill
 :read !git diff --staged            " add staged changes
 :read !tree -L 3                    " project structure
-:read !grep -rn "auth" src/         " search results
 dap                                 " delete a section
-:w .cogcog/workbench.md             " save manually if you want
 ```
 
 ## Shell
 
 ```bash
-# with copilot backend (opus 4.6 smart, sonnet 4.6 fast — no API key needed)
 export COGCOG_BACKEND=copilot
 echo "explain CRDs" | cogcog --raw          # fast: sonnet 4.6
 git diff --staged | cogcog "review this"    # smart: opus 4.6
-
-# or with direct API keys
-echo "explain CRDs" | cogcog --raw
-cat src/main.ts | cogcog --raw "any bugs?"
 ```
 
 ## Combos
@@ -273,46 +224,6 @@ gd → gaip                   definition → explain
 <leader>gj                  jump trail → how connected
 <leader>g.                  changes → any bugs
 gsip → <leader>gcip         generate → verify
-<C-g> → <leader>gx          plan → execute
+<C-g>                       plan in workbench
 <leader>cd → gf → gaip      discover → navigate → understand
 ```
-
-## Discovery workflow
-
-```text
-<leader>cd                          map the project
-```
-
-Output:
-
-```markdown
-### Auth
-- `src/auth/middleware.ts` — JWT validation
-- `src/auth/oauth.ts` — OAuth2 flow
-
-### Database
-- `src/db/pool.ts` — connection pooling
-```
-
-Navigate: cursor on path → `gf` → you're in the file.
-
-Pin a domain into the workbench:
-
-```text
-/### Auth                           jump to auth section
-V/### Database                      select the auth domain
-<leader>gy                          pin to workbench
-<C-g> → "simplify the token refresh"
-```
-
-## Per-project system prompts
-
-`.cogcog/system.md`:
-
-```text
-You are a senior engineer.
-Be concise. Show code when relevant, explain when asked.
-This project uses Go, PostgreSQL, Redis.
-```
-
-Loaded automatically. Improved incrementally via `<leader>cp`.

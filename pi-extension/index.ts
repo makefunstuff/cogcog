@@ -29,11 +29,11 @@ export default function (pi: ExtensionAPI) {
   async function nvimCall(method: string, args?: Record<string, any>): Promise<any> {
     let luaExpr: string;
     if (args) {
-      // use [=[...]=] to avoid ]] issues in JSON
+      // use [=[...]=] to avoid ]] issues in JSON, [[...]] for require
       const json = JSON.stringify(args);
-      luaExpr = `require('cogcog.bridge').${method}([=[${json}]=])`;
+      luaExpr = `require([[cogcog.bridge]]).${method}([=[${json}]=])`;
     } else {
-      luaExpr = `require('cogcog.bridge').${method}()`;
+      luaExpr = `require([[cogcog.bridge]]).${method}()`;
     }
 
     const result = await pi.exec(

@@ -4,7 +4,7 @@ INTRODUCTION                                    *cogcog*
 
 cogcog adds LLM verbs to vim. They compose with motions and text
 objects. Most verbs run at 0.3s via the bundled raw transport.
-External checker commands are optional. Broader execute uses pi RPC.
+External checker commands are optional.
 
 Note: `ga` overrides show-ASCII, `gs` overrides sleep,
 `<C-g>` overrides show-file-info.
@@ -44,26 +44,14 @@ DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
                 command. Split reused.
 
                                                 *cogcog-gx*
-<leader>gx      pi RPC execute. Runs in the workbench.
-                Uses visible state, quickfix, and workbench
-                contents as prompt anchors. Starts
-                `pi --mode rpc --no-session` by default.
-                Set COGCOG_PI_RPC_CMD to override provider/model.
-                Repeated use while pi is active sends a steering turn.
-                UI requests use vim.ui and a temporary editor split.
-                If `.cogcog/pi-bridge.sock` exists, Cogcog attaches to the
-                companion harness instead of spawning pi directly.
-
-USER COMMANDS                                    *cogcog-commands*
-
-:CogcogCompanionStatus  Show socket/attach state.
-:CogcogCompanionStop    Stop the companion broker.
-:CogcogDetach           Detach the current local pi channel.
+<leader>gx      Reminder to use pi in the other terminal.
+                Pi connects to Neovim via the cogcog bridge and
+                has full editor awareness. See |cogcog-pi|.
 
                                                 *cogcog-cd*
 <leader>cd      Discover project. Writes .cogcog/discovery.md
-                (gf-navigable). By default uses the bundled cogcog
-                transport. Set COGCOG_CHECKER to override.
+                (gf-navigable). Pre-computes stats in Lua, model
+                fills in architecture and module tables.
 
 PLANNING                                        *cogcog-plan*
 
@@ -117,7 +105,6 @@ Scope model:
     soft context    visible windows for grounding only
 
 Quickfix is the deliberate batch boundary when present.
-Visible windows help grounding, but should not replace explicit scope.
 
 WORKBENCH                                       *cogcog-workbench* *cogcog-panel*
 
@@ -137,6 +124,37 @@ WORKBENCH                                       *cogcog-workbench* *cogcog-panel
                                                 *cogcog-cancel*
 <C-c>           Cancel jobs. Pass-through when idle.
 
+PI INTEGRATION                                  *cogcog-pi*
+
+cogcog auto-starts a Neovim server socket on load:
+>
+    /tmp/cogcog.sock        (or COGCOG_NVIM_SOCKET)
+<
+A pi extension connects to this socket and gives pi full editor
+awareness. Pi runs in a separate terminal — no wrappers needed.
+
+Install the extension:
+>
+    ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+<
+Pi auto-injects Neovim context into every prompt and registers tools:
+    nvim_context        buffer, cursor, windows, quickfix, diagnostics
+    nvim_buffer         read buffer content
+    nvim_buffers        list loaded buffers
+    nvim_diagnostics    LSP diagnostics
+    nvim_goto           open file at line in Neovim
+
+CLI tool for scripts and skills:
+>
+    nv status                   check connection
+    nv context                  full editor state (JSON)
+    nv buffer [path]            read buffer content
+    nv diagnostics [path]       LSP diagnostics
+    nv goto <path> [line]       navigate user to file
+    nv eval <lua-expr>          arbitrary Lua
+<
+See `skills/nvim-bridge/SKILL.md` for full reference.
+
 CONFIGURATION                                   *cogcog-config*
 
 Default behavior:
@@ -144,26 +162,7 @@ Default behavior:
     No external harness is required for the core loop.
 
 Optional overrides:
-    gx              COGCOG_PI_RPC_CMD (explicit pi RPC command)
     gc/discover     COGCOG_CHECKER (explicit stronger review/discovery command)
-
-                                                *cogcog-fast-model*
-COGCOG_FAST_MODEL   Fast model for most verbs via the bundled cogcog command.
-
-                                                *cogcog-pi-rpc-cmd*
-COGCOG_PI_RPC_CMD   Optional pi RPC command for <leader>gx.
-                Default: `pi --mode rpc --no-session`.
-                Use it to pick a specific provider/model.
-
-                                                *cogcog-checker*
-COGCOG_CHECKER      Optional stronger command for check/discover.
-                When unset, check/discover fall back to cogcog --raw.
-
-                                                *cogcog-pi-socket*
-COGCOG_PI_SOCKET    Optional companion harness socket path.
-                Default: `.cogcog/pi-bridge.sock`.
-                When present and connectable, gx / workbench pi-RPC flows
-                attach to the shared harness session.
 
                                                 *cogcog-backend*
 COGCOG_BACKEND      "anthropic", "openai", "codex", "copilot", or "pi"
@@ -173,11 +172,13 @@ COGCOG_BACKEND      "anthropic", "openai", "codex", "copilot", or "pi"
                   smart model: claude-opus-4.6
                   fast model (--raw): claude-sonnet-4.6
                 pi: delegates to `pi -p` (~0.7s startup).
-                See |cogcog-pi-provider|.
 
-                                                *cogcog-pi-provider*
-COGCOG_PI_PROVIDER  Provider for pi backend (default: openai-codex).
-                Any provider pi supports: anthropic, google, etc.
+                                                *cogcog-fast-model*
+COGCOG_FAST_MODEL   Fast model for most verbs via the bundled cogcog command.
+
+                                                *cogcog-checker*
+COGCOG_CHECKER      Optional stronger command for check/discover.
+                When unset, check/discover fall back to cogcog --raw.
 
                                                 *cogcog-api-url*
 COGCOG_API_URL      API endpoint (anthropic/openai backends only).
@@ -191,18 +192,16 @@ COGCOG_MODEL        Default model when FAST_MODEL not set.
                                                 *cogcog-max-tokens*
 COGCOG_MAX_TOKENS   Max tokens (default 8192).
 
+                                                *cogcog-nvim-socket*
+COGCOG_NVIM_SOCKET  Neovim server socket path (default /tmp/cogcog.sock).
+                Used by the pi extension and nv CLI tool.
+
 PROJECT FILES                                   *cogcog-project*
 
 .cogcog/system.md       System prompt. Shared by all verbs.
 .cogcog/workbench.md    Auto-saved/restored workbench.
 .cogcog/discovery.md    Project map.
-.cogcog/pi-bridge.sock  Optional companion harness socket.
-
-Companion harness:
->
-    bin/cogcog-bridge   start shared pi RPC broker
-    bin/cogcog-harness  start/attach terminal harness client
-<
+.cogcog/tools/          Project-local tools (bash/lua scripts).
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 
@@ -220,12 +219,15 @@ Fast (0.3s): >
 <
 Optional: >
     <leader>gcip    check
-    <leader>gx      pi RPC execute
+    <leader>gx      use pi in other terminal
     <leader>cd      discover
 <
 Other: >
     <leader>gy      pin
     <leader>co      workbench
+    <leader>g!      exec → workbench
+    <leader>ct      run project tool
+    <leader>cT      generate tool
     <leader>cp      improve prompt
     <leader>cc      clear
     <C-c>           cancel

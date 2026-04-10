@@ -74,15 +74,6 @@ I need to see the current auth implementation.
   export function authMiddleware(req, res, next) { ... }
   --- end ---
 
-I also need the rate limiter.
-
-🔧 grep("RateLimiter", "src/")
-
-  --- tool: grep ---
-  src/limiter.ts:3:export class RateLimiter {
-  src/middleware/rate-limit.ts:1:import { RateLimiter } from './limiter';
-  --- end ---
-
 Here's the refactored version using token buckets:
   [code in workbench]
 ```
@@ -92,16 +83,12 @@ The model gets up to 5 tool turns per question, then stops.
 
 **Available tools:**
 
-| Tool | What | Native |
+| Tool | What | Source |
 |------|------|--------|
 | `read_file(path)` | read a project file | shell |
 | `list_files(dir)` | list directory contents | shell |
 | `grep(pattern, path)` | search for patterns | shell |
 | `run_command(cmd)` | execute a shell command | shell |
-| `diagnostics()` | LSP diagnostics across open buffers | neovim |
-| `lsp_symbols(path)` | document symbols via LSP | neovim |
-| `buffers()` | list loaded buffers | neovim |
-| `kb_search(query)` | search knowledge base | neovim |
 | `.cogcog/tools/*.sh` | your bash scripts | shell |
 | `.cogcog/tools/*.lua` | your neovim-native scripts | neovim |
 
@@ -122,26 +109,43 @@ The model gets up to 5 tool turns per question, then stops.
 <C-g> → "what failed?"             ask about the output
 ```
 
-Optional companion harness:
+### 7. Pi integration (separate terminal)
+
+CogCog gives [pi](https://github.com/badlogic/pi-mono) eyes into your Neovim via a bridge module.
+
+```
+Terminal 1: nvim                    (cogcog fast verbs, editing)
+Terminal 2: pi                      (agent work, multi-file changes)
+                │
+                ├─ sees your buffer, cursor, windows, quickfix, diagnostics
+                ├─ tools: nvim_context, nvim_buffer, nvim_diagnostics, nvim_goto
+                └─ file edits → Neovim autoread picks up changes
+```
+
+CogCog auto-starts `vim.fn.serverstart("/tmp/cogcog.sock")` on load.
+Install the pi extension:
 
 ```bash
-bin/cogcog-harness
+ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
-This keeps the current editor-native flow intact, but adds a second terminal UI
-that can share the same live pi RPC session with Neovim through
-`.cogcog/pi-bridge.sock`.
+Pi auto-injects your Neovim state into every prompt and registers tools the LLM
+can call to read buffers, check diagnostics, or navigate you to a file.
 
-Launch it in a separate terminal from the project root.
-Useful Neovim-side commands:
+No wrappers. No bridge process. Just pi + a TypeScript extension talking to
+Neovim's native RPC socket.
 
-```vim
-:CogcogCompanionStatus  " show socket/attach state
-:CogcogCompanionStop    " stop the broker
-:CogcogDetach           " detach Neovim from the current pi channel
+CLI tool for scripts and agent skills:
+
+```bash
+nv status                           # check connection
+nv context                          # buffer, cursor, windows, quickfix, diagnostics
+nv buffer [path]                    # read buffer content
+nv diagnostics [path]               # LSP errors/warnings
+nv goto <path> [line]               # open file in Neovim
 ```
 
-### 7. Batch (quickfix)
+### 8. Batch (quickfix)
 
 ```vim
 :grep "TODO" src/**                 build target set
@@ -151,87 +155,23 @@ Useful Neovim-side commands:
 
 Quickfix is the hard boundary. Cogcog never roams beyond it.
 
-### 8. Discover (unfamiliar code)
+### 9. Discover (unfamiliar code)
 
 ```
 <leader>cd                          project dashboard
 ```
 
-Discovery pre-computes real stats in Lua, then asks the model to fill in the
-intelligent parts. The result is a markdown dashboard, not a README summary:
+Pre-computes real stats (files, LOC, git, treesitter, LSP, diagnostics),
+then asks the model to synthesize architecture + module tables.
+Dense dashboard, not a README summary.
 
-```markdown
-# 📋 cogcog
+### 10. Project tools (`.cogcog/tools/`)
 
-| | |
-|---|---|
-| 🔀 Branch | `master` |
-| 📁 Files | 24 |
-| 📏 Source LOC | 1,890 |
-| 📝 Commits | 47 |
-| 🕐 Last commit | f19104e rewrite discovery (2 hours ago) |
-| 🩺 Health | ❌0 ⚠️2 ℹ️0 💡3 |
-
-## 🏗 Architecture
-    init.lua ──→ context.lua ──→ stream.lua ──→ bin/cogcog
-
-## 📦 Modules
-### Core
-| File | LOC | Role |
-|------|-----|------|
-| `lua/cogcog/init.lua` | ~890 | keymaps, verbs, tools |
-| `lua/cogcog/context.lua` | ~210 | scope builders, KB |
-...
-```
-
-Data sources:
-
-| Pre-computed (Lua) | Model fills in |
-|--------------------|----------------|
-| File count, LOC, git stats | Architecture paragraph + diagram |
-| File type breakdown | Module groupings + tables |
-| Treesitter declarations | Entry points + call flow |
-| LSP symbols | Stack + patterns |
-| Diagnostics counts | Issues (if any) |
-| KB search results | Team knowledge (if KB set) |
-
-KB search is **LLM-powered**: sends the full page index to the model, gets
-back the relevant paths. Not grep — the model understands what's related.
-
-### 9. Project tools (`.cogcog/tools/`)
-
-Scripts in `.cogcog/tools/` are project-local tools. Bash (`.sh`) for shell work,
-Lua (`.lua`) for Neovim-native work. The model can use them during workbench
-synthesis, and you can run them directly.
-
-```bash
-# bash tool — shell work
-cat > .cogcog/tools/test-changed.sh << 'EOF'
-#!/bin/bash
-# Run tests for files changed since last commit
-git diff --name-only HEAD | grep -E '\.ts$' | xargs npx jest --findRelatedTests
-EOF
-chmod +x .cogcog/tools/test-changed.sh
-```
-
-```lua
--- lua tool — neovim-native (.cogcog/tools/unused-imports.lua)
--- Find files with LSP diagnostics about unused imports
-local diags = vim.diagnostic.get()
-local out = {}
-for _, d in ipairs(diags) do
-  if d.message:match("[Uu]nused") then
-    local f = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(d.bufnr), ":.")
-    table.insert(out, f .. ":" .. (d.lnum + 1) .. " " .. d.message)
-  end
-end
-return table.concat(out, "\n")
-```
-
-Generate new tools with the LLM — choose bash or lua:
+Scripts in `.cogcog/tools/` are project-local tools.
 
 ```
-<leader>cT → "tool that finds unused exports" → [bash / lua] → review → save
+<leader>cT → "tool that finds unused exports" → review → save
+<leader>ct → pick and run a saved tool
 ```
 
 The self-evolution loop:
@@ -240,30 +180,6 @@ The self-evolution loop:
 encounter friction ──→ <leader>cT "tool that checks X" ──→ review ──→ save
        ↑                                                                 │
        └──── next time: <leader>ct or model uses it via <C-g> ──────────┘
-```
-
-## The loops
-
-```
-stateless           gaip → read → gaip → read          (0.3s per call)
-                    gsaf → :w → :make → fix
-                    <leader>graf → review → iterate
-                    <leader>gcaf → done
-```
-
-```
-workbench           <C-g> "question"                    (model uses tools)
-                      → 🔧 read_file → y               (you approve)
-                      → 🔧 grep → y                    (you approve)
-                      → model responds with full context
-                    <C-g> "now implement it"             (continues)
-                      → model uses tools again if needed
-```
-
-```
-orient + plan       <leader>cd → gf → gaip → <leader>gy → <C-g>
-batch               :grep → <leader>gR → :make
-evolve              <leader>cT → tool saved → <leader>ct or <C-g> reuses it
 ```
 
 ## Context model
@@ -275,15 +191,11 @@ evolve              <leader>cT → tool saved → <leader>ct or <C-g> reuses it
 | **Soft context** | nearby signals | visible windows |
 | **Tool results** | data the model fetched | tool calls you approved in workbench |
 
-Your screen is your context for fast verbs.
-The workbench accumulates context for longer work — including tool results.
-Quickfix is the batch scope.
-
 ## Install
 
 ```lua
 -- lazy.nvim
-{ "makefunstuff/cogcog", config = function() require("cogcog") end }
+{ "makefunstuff/cogcog", lazy = false, config = function() require("cogcog") end }
 ```
 
 ### Backend setup
@@ -295,7 +207,6 @@ export COGCOG_BACKEND=copilot
 
 # or: OpenAI Codex (no API key needed, 18ms overhead)
 export COGCOG_BACKEND=codex
-# default: gpt-5.4
 
 # or: direct Anthropic
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -318,7 +229,6 @@ export COGCOG_KB=~/path/to/your/knowledge-base
 
 When set, discovery dashboards include relevant KB pages, and the
 `kb_search` tool becomes available during workbench synthesis.
-The KB should have a `wiki/` directory with markdown files.
 
 ## All keymaps
 
@@ -347,19 +257,11 @@ The KB should have a `wiki/` directory with markdown files.
 | `<leader>gR` | n | batch rewrite quickfix |
 | `<leader>cd` | n | discover project |
 | `<leader>cp` | n | improve prompt |
-| `<leader>gx` | n | pi RPC execute |
+| `<leader>gx` | n | reminder: use pi in the other terminal |
 | `<C-c>` | n/i | cancel |
 | `q` | split | close |
 | `a` | review | apply |
 | `u` | after refactor | undo |
-
-## Per-project prompts
-
-`.cogcog/system.md` is loaded automatically. Improve it incrementally:
-
-```
-<leader>cp → "too generic, read the actual code"
-```
 
 ## Philosophy
 
@@ -378,6 +280,9 @@ lua/cogcog/init.lua      verbs and keymaps
 lua/cogcog/stream.lua    streaming to buffers
 lua/cogcog/context.lua   scope builders, workbench, helpers
 lua/cogcog/config.lua    paths and config
+lua/cogcog/bridge.lua    editor state exposed to external tools (pi extension)
+pi-extension/index.ts    pi extension — gives pi eyes into Neovim
+skills/nvim-bridge/      skill for querying Neovim from agents
 doc/cogcog.txt           :help cogcog
 .cogcog/                 per-project prompts, tools, and state
 ```
