@@ -6,17 +6,19 @@ Work through this in order — each section builds on the previous one.
 ## Prerequisites
 
 ```bash
-# Verify your setup
-echo $COGCOG_BACKEND       # → copilot
-echo $COGCOG_CMD            # → (should be empty)
-echo $COGCOG_CHECKER        # → (should be empty)
+# Common setup
+echo $COGCOG_BACKEND        # e.g. copilot, codex, anthropic, openai, pi
+echo $COGCOG_CHECKER        # optional stronger command for check/discover
+echo $COGCOG_NVIM_SOCKET    # optional, defaults to /tmp/cogcog.sock
 ```
 
-Open Neovim. Confirm cogcog loads:
+Open Neovim, put your cursor on any code paragraph, and try:
 
 ```vim
-:echo has_key(plugs, 'cogcog')   " or just try gaip on any file
+gaip
 ```
+
+If a `[cogcog-ask]` split opens, cogcog is loaded.
 
 ---
 
@@ -32,9 +34,11 @@ There are three context tiers:
 
 | Tier | What | Example |
 |------|------|---------|
-| **Hard scope** | The explicit operand you're acting on | `gaip` → this paragraph |
-| **Explicit imports** | Text you deliberately brought in | workbench contents, pinned snippets |
-| **Soft context** | Nearby signals for grounding | visible windows, quickfix list |
+| **Hard scope** | The explicit operand you're acting on, or the current quickfix target set | `gaip`, `<leader>gR` |
+| **Explicit imports** | Text you deliberately brought in | workbench contents, pinned snippets, command output |
+| **Soft context** | Nearby signals for grounding | visible windows |
+
+Quickfix is not just background context — when you use quickfix flows, it becomes the explicit batch boundary.
 
 You always know what the model probably saw.
 
@@ -484,37 +488,55 @@ This appends your feedback to `.cogcog/system.md`. Prompts improve per-project o
 
 ---
 
-## Part 12: Execute with pi RPC
+## Part 12: Pi in the other terminal
 
-`<leader>gx` is the broad-write path. It uses pi RPC and keeps the workbench as the control surface.
+Cogcog does not run an embedded agent loop inside Neovim.
+For multi-file agent work, use pi in a second terminal and let the cogcog extension bridge the two.
 
-### 12a. Optional override
-
-By default Cogcog starts:
-
-```bash
-pi --mode rpc --no-session
-```
-
-If you want a specific pi/provider/model command, set:
+### 12a. Install the pi extension
 
 ```bash
-export COGCOG_PI_RPC_CMD="pi --mode rpc --no-session --provider github-copilot --model gpt-5.1-codex"
+ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
-### 12b. Use it
+Cogcog auto-starts a Neovim socket at `/tmp/cogcog.sock` when it loads.
+Set `COGCOG_NVIM_SOCKET` only if you want a different path.
 
+### 12b. Run pi next to Neovim
+
+```text
+Terminal 1: nvim              fast verbs, edits, visual review
+Terminal 2: pi                agent work, multi-file changes
 ```
-<leader>gx → "refactor auth across all files"
+
+With the extension installed, pi automatically gets:
+- injected editor context (buffer, cursor, visible windows, quickfix, diagnostics)
+- `nvim_context`
+- `nvim_buffer`
+- `nvim_buffers`
+- `nvim_diagnostics`
+- `nvim_goto`
+- `nvim_quickfix`
+- `nvim_exec`
+- `nvim_notify`
+
+### 12c. Typical flow
+
+Ask pi to review a file or module. Pi can read open buffers, push findings into quickfix, and send notifications back to Neovim.
+
+Then use native vim tools to act on the results:
+
+```vim
+:cnext
+:cprev
+<leader>gQ
+<leader>gR
 ```
 
-Activity streams into the workbench. The prompt is anchored by visible windows, quickfix, and workbench contents. If you trigger `<leader>gx` again while pi is still running, Cogcog sends a steering message into the same RPC session.
-If pi asks for confirmation, selection, or text input, Cogcog routes that through native Neovim UI. Multi-line editor requests open a temporary split.
+### 12d. What `<leader>gx` does
 
-### 12c. Why it's separate
-
-`<leader>gx` is the only verb that gives the model write access beyond the current operand.
-Everything else is bounded. Use it when the workbench should drive multi-file execution, not as the default everyday path.
+`<leader>gx` is just a reminder: use pi in your other terminal for agent work.
+It does not start a special RPC mode or background harness.
 
 ---
 
@@ -608,8 +630,7 @@ gaip                                    " explain with both visible
 ## Part 16: What Cogcog is NOT
 
 - **Not a chat harness.** No hidden session, no context accumulation unless you open the workbench.
-- **Not an autonomous agent.** `<leader>gx` is a separate pi-RPC execution path for broader work, not the default everyday loop.
-- **Companion mode is optional.** If you run `bin/cogcog-harness` in a separate terminal, Neovim can share that live pi session, but the normal editor-native flow stays the default.
+- **Not an embedded agent loop.** Multi-file agent work happens in a separate pi terminal; `<leader>gx` just reminds you of that path.
 - **Not a RAG system.** No background indexing, no embedding store.
 - **Not a persistent memory.** Each verb call is stateless. The workbench is opt-in persistence.
 - **Not fighting vim.** Motions, text objects, splits, quickfix, `gf`, `:read` — all work as vim intended.
@@ -631,6 +652,8 @@ gaip                                    " explain with both visible
 | `<leader>gy` | pin to workbench | instant |
 | `<leader>co` | toggle workbench | instant |
 | `<leader>cc` | clear workbench | instant |
+| `<leader>g!` | exec command → workbench | instant |
+| `<leader>ct` / `<leader>cT` | run / generate project tools | fast |
 | `<leader>gj` | jump trail context | fast |
 | `<leader>g.` | recent changes review | fast |
 | `<leader>gq` | summarize quickfix | fast |
@@ -638,9 +661,7 @@ gaip                                    " explain with both visible
 | `<leader>gR` | batch rewrite quickfix | fast |
 | `<leader>cd` | discover project | fast |
 | `<leader>cp` | improve prompt | instant |
-| `<leader>gx` | pi RPC execute | slow |
-| `bin/cogcog-harness` | start companion harness in a separate terminal | instant |
-| `:CogcogCompanionStop` | stop companion broker | instant |
+| `<leader>gx` | remind me to use pi in the other terminal | instant |
 | `<C-c>` | cancel | instant |
 | `q` | close split | instant |
 | `a` | apply review buffer | instant |

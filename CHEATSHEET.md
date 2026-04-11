@@ -65,14 +65,16 @@ Pi sees your Neovim state via the cogcog bridge extension.
 ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
-CLI tool:
+Optional `nv` helper:
 
 ```bash
 nv status                   check connection
 nv context                  buffer, cursor, windows, diagnostics
 nv buffer [path]            read buffer content
+nv buffers                  list loaded buffers
 nv diagnostics [path]       LSP diagnostics
 nv goto <path> [line]       navigate to file
+nv eval <lua-expr>          arbitrary Lua
 ```
 
 ## Config

@@ -36,8 +36,11 @@ The model can request tools. Every call visible, every call approved:
 🔧 grep("RateLimiter", "src/")
 ```
 
-Tools: `read_file`, `list_files`, `grep`, `run_command`, plus anything in
-`.cogcog/tools/`.
+Built-ins: `read_file`, `list_files`, `grep`, `run_command`, `diagnostics`,
+`lsp_symbols`, `buffers`, `kb_search`, plus anything in `.cogcog/tools/`.
+
+Approvals are controlled by `vim.g.cogcog_tool_mode`:
+`"ask"` (default), `"read"` (auto-approve read-only tools), `"trust"`.
 
 ## Neovim is Neovim
 
@@ -140,14 +143,16 @@ ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 No bridge process. No wrapper scripts. Pi talks directly to Neovim's native
 RPC socket via the `cogcog.bridge` Lua module.
 
-**CLI tool** for scripts and agent skills:
+**Optional `nv` helper** for scripts and agent skills:
 
 ```bash
 nv status                   # check connection
 nv context                  # buffer, cursor, windows, diagnostics
 nv buffer [path]            # read buffer content
+nv buffers                  # list loaded buffers
 nv diagnostics [path]       # LSP diagnostics
 nv goto <path> [line]       # navigate editor to file
+nv eval <lua-expr>          # arbitrary Lua
 ```
 
 ## Batch (quickfix)
@@ -191,7 +196,7 @@ encounter friction ──→ <leader>cT generate tool ──→ review ──→
 
 | Tier | What | You control it by |
 |------|------|-------------------|
-| **Hard scope** | the text you act on | motion, selection, buffer |
+| **Hard scope** | the text you act on, or the current quickfix target set | motion, selection, buffer, quickfix |
 | **Explicit imports** | text you brought in | workbench, `<leader>gy`, `<leader>g!` |
 | **Soft context** | nearby signals | visible windows |
 | **Tool results** | data the model fetched | tool calls you approved |

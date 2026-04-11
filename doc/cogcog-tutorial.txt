@@ -2,11 +2,11 @@
 
 SETUP                                           *cogcog-tutorial-setup*
 >
-    export ANTHROPIC_API_KEY="sk-ant-..."
-    cp bin/cogcog ~/.local/bin/ && chmod +x ~/.local/bin/cogcog
+    export COGCOG_BACKEND=copilot
+    export COGCOG_CHECKER="..."      " optional stronger check/discover cmd
 <
 Neovim: >
-    { dir = "/path/to/cogcog" }
+    open any code file and try: gaip
 <
 
 EXPLAIN (0.3s)                                  *cogcog-tutorial-ask*
@@ -14,13 +14,14 @@ EXPLAIN (0.3s)                                  *cogcog-tutorial-ask*
     gaip            concise (no prompt)
     gaa             entire buffer
     3gaip           detailed
-    Visual ga       prompted
+    Visual ga       prompted question
 <
 
-PLAN (fast)                                     *cogcog-tutorial-plan*
+PLAN (workbench + tools)                        *cogcog-tutorial-plan*
 >
     <C-g> → "add rate limiting"
     <C-g> → "use token bucket"
+    <leader>gy      pin selection
 <
 
 GENERATE (0.3s)                                 *cogcog-tutorial-gen*
@@ -32,22 +33,29 @@ GENERATE (0.3s)                                 *cogcog-tutorial-gen*
 REFACTOR                                        *cogcog-tutorial-refactor*
 >
     <leader>graf → "simplify"       u to undo
+    large rewrites open review       a apply / q close
 <
 
-CHECK (opus)                                    *cogcog-tutorial-check*
+CHECK                                           *cogcog-tutorial-check*
 >
     <leader>gcaf
+    uses cogcog --raw unless COGCOG_CHECKER is set
 <
 
-EXECUTE (cloud agent)                           *cogcog-tutorial-exec*
+PI (other terminal)                             *cogcog-tutorial-exec*
 >
-    <leader>gx → "refactor auth"   in context panel
+    ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+    Terminal 1: nvim
+    Terminal 2: pi
+    <leader>gx        reminder: use pi in the other terminal
 <
 
 INVESTIGATE                                     *cogcog-tutorial-investigate*
 >
     <leader>gj          jump trail
     <leader>g.          recent changes
+    <leader>gQ          review quickfix
+    <leader>gR          rewrite quickfix targets
 <
 
 ITERATE                                         *cogcog-tutorial-iterate*

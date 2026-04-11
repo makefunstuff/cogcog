@@ -144,8 +144,8 @@ Terminal 2: pi                agent work, multi-file changes
 CogCog auto-starts `vim.fn.serverstart("/tmp/cogcog.sock")`.
 Pi connects via the cogcog extension and gets:
 
-- **Auto-injected context**: every prompt includes your buffer, cursor, windows, diagnostics
-- **5 tools**: `nvim_context`, `nvim_buffer`, `nvim_buffers`, `nvim_diagnostics`, `nvim_goto`
+- **Auto-injected context**: every prompt includes your buffer, cursor, visible windows, quickfix, and diagnostics
+- **8 tools**: `nvim_context`, `nvim_buffer`, `nvim_buffers`, `nvim_diagnostics`, `nvim_goto`, `nvim_quickfix`, `nvim_exec`, `nvim_notify`
 - When pi edits files, Neovim autoread picks up changes
 
 Install:
@@ -154,12 +154,13 @@ Install:
 ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
-CLI tool for scripts and agent skills:
+Optional `nv` helper for scripts and agent skills:
 
 ```bash
 nv status                   check connection
 nv context                  full editor state
 nv buffer [path]            read buffer content
+nv buffers                  list loaded buffers
 nv diagnostics [path]       LSP diagnostics
 nv goto <path> [line]       open file in Neovim
 nv eval <lua-expr>          arbitrary Lua

@@ -143,12 +143,16 @@ Pi auto-injects Neovim context into every prompt and registers tools:
     nvim_buffers        list loaded buffers
     nvim_diagnostics    LSP diagnostics
     nvim_goto           open file at line in Neovim
+    nvim_quickfix       set quickfix items in the editor
+    nvim_exec           run a vim command
+    nvim_notify         send a notification to Neovim
 
-CLI tool for scripts and skills:
+Optional `nv` helper for scripts and skills:
 >
     nv status                   check connection
     nv context                  full editor state (JSON)
     nv buffer [path]            read buffer content
+    nv buffers                  list loaded buffers
     nv diagnostics [path]       LSP diagnostics
     nv goto <path> [line]       navigate user to file
     nv eval <lua-expr>          arbitrary Lua
