@@ -55,13 +55,10 @@ CogCog uses what Neovim already has:
 
 No panels. No sidebars. No chat windows. No special UI.
 
-## Pi is pi
+## Pi bridge
 
-[Pi](https://github.com/badlogic/pi-mono) is a coding agent that runs in your
-terminal. It has its own TUI, its own session management, its own tools. It
-doesn't need to be embedded in anything.
-
-CogCog includes a pi extension that gives pi eyes — and hands — into your Neovim:
+Pi runs in your terminal. CogCog gives it eyes and hands into your Neovim
+via a shared socket (`/tmp/cogcog.sock`).
 
 ```
 Terminal 1: nvim                    editing, fast verbs, visual review
@@ -90,70 +87,34 @@ And it can reach back into your editor:
 | `nvim_exec` | run a vim command (`:make`, `:grep`, `:write`) |
 | `nvim_notify` | send a notification to your editor |
 
-### Example: pi finds issues → you browse them in Neovim
-
-You ask pi to review a module. Pi reads the code, finds issues, and pushes
-them to your quickfix list:
-
-```
-You:  review terraform/utils/iam.ts for code smells
-
-Pi:   I'll read the file and check for issues.
-      [reads file via nvim_buffer]
-
-      Found 3 issues. Sending to your quickfix list.
-      [calls nvim_quickfix]
-
-      Set 3 items in quickfix (pi: code review)
-```
-
-In your Neovim, the quickfix window opens:
-
-```
-terraform/utils/iam.ts|28 W| getUserOrgRoles: flatMap may produce duplicates
-terraform/utils/iam.ts|97 W| getGoogleRolesForProject: .map() for side effects — use forEach
-terraform/utils/iam.ts|42 I| nested ternary is hard to read — extract to helper
-```
-
-Now you navigate them with `:cnext` / `:cprev`, or open Telescope:
-
-```vim
-:Telescope quickfix
-```
-
-Pick one, jump to the line, fix it. This is Neovim's native quickfix workflow —
-pi just filled it with intelligent findings instead of grep matches.
-
-You can also hand the quickfix back to cogcog:
-
-```
-<leader>gR              batch rewrite all quickfix targets
-<leader>gQ              review and prioritize the list
-```
-
-Pi finds. Neovim navigates. Cogcog rewrites. Each tool does what it's best at.
-
 ### Setup
 
 ```bash
-# cogcog auto-starts the Neovim server socket on load — just symlink:
 ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
 No bridge process. No wrapper scripts. Pi talks directly to Neovim's native
 RPC socket via the `cogcog.bridge` Lua module.
 
-**Optional `nv` helper** for scripts and agent skills:
+## Backend
+
+CogCog uses any OpenAI-compatible endpoint. Point it at a local llama-server,
+Ollama, or any API:
 
 ```bash
-nv status                   # check connection
-nv context                  # buffer, cursor, windows, diagnostics
-nv buffer [path]            # read buffer content
-nv buffers                  # list loaded buffers
-nv diagnostics [path]       # LSP diagnostics
-nv goto <path> [line]       # navigate editor to file
-nv eval <lua-expr>          # arbitrary Lua
+export COGCOG_API_URL=http://192.168.1.138:8091/v1/chat/completions
+export COGCOG_MODEL=gemma4:26b
+export OPENAI_API_KEY=dummy   # required by protocol, any value works for local
 ```
+
+Optional fast model for inline operations:
+
+```bash
+export COGCOG_FAST_API_URL=http://localhost:1234/v1/chat/completions
+export COGCOG_FAST_MODEL=gemma-4-e4b
+```
+
+That's it. No OAuth, no token refresh, no cloud auth management.
 
 ## Batch (quickfix)
 
@@ -173,7 +134,6 @@ Quickfix is the boundary. Cogcog never roams beyond it.
 
 Pre-computes real stats (files, LOC, git, treesitter, LSP, diagnostics),
 then asks the model to synthesize architecture and module tables.
-Dense dashboard, not a README summary.
 
 ## Project tools
 
@@ -182,14 +142,6 @@ Scripts in `.cogcog/tools/` are project-local and model-available:
 ```
 <leader>cT → "tool that finds unused exports" → review → save
 <leader>ct → pick and run
-```
-
-The self-evolution loop:
-
-```
-encounter friction ──→ <leader>cT generate tool ──→ review ──→ save
-       ↑                                                        │
-       └──── <leader>ct or model uses it via <C-g> ────────────┘
 ```
 
 ## Context model
@@ -206,18 +158,6 @@ encounter friction ──→ <leader>cT generate tool ──→ review ──→
 ```lua
 { "makefunstuff/cogcog", lazy = false, config = function() require("cogcog") end }
 ```
-
-### Backend
-
-```bash
-# GitHub Copilot — no API key needed, 14ms overhead
-export COGCOG_BACKEND=copilot
-
-# or: OpenAI Codex, direct Anthropic, any OpenAI-compatible endpoint
-```
-
-`copilot` and `codex` read OAuth from pi's `~/.pi/agent/auth.json`.
-Run `pi /login` once. Requires `bash`, `curl`, `jq`.
 
 ## All keymaps
 
@@ -253,7 +193,7 @@ See [TUTORIAL.md](TUTORIAL.md) · [USAGE.md](USAGE.md) · [CHEATSHEET.md](CHEATS
 ## Structure
 
 ```
-bin/cogcog               stdin → LLM → stdout
+bin/cogcog               stdin → LLM → stdout (OpenAI-compatible)
 lua/cogcog/init.lua      verbs, keymaps, tools
 lua/cogcog/stream.lua    streaming to buffers
 lua/cogcog/context.lua   scope builders, workbench

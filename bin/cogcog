@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cogcog — stdin → LLM → stdout
-# That's it. Pipe your context in, get a response out.
+# Pipe your context in, get a response out.
 #
 # Usage:
 #   echo "explain this" | cogcog
@@ -9,27 +9,16 @@
 #   :'<,'>!cogcog      (from vim — send selection)
 #
 # Env:
-#   COGCOG_CMD         delegate to another CLI (e.g. "claude -p", "opencode run")
-#   COGCOG_BACKEND     "anthropic" (default), "openai", "codex", "copilot", or "pi"
-#   COGCOG_API_URL     override API endpoint (e.g. http://localhost:11434/v1/chat/completions)
-#   COGCOG_API_KEY     API key (overrides backend-specific env vars)
+#   COGCOG_CMD         delegate to another CLI (e.g. "claude -p")
+#   COGCOG_API_URL     API endpoint (default: OpenAI-compatible)
+#   COGCOG_API_KEY     API key (or OPENAI_API_KEY)
 #   COGCOG_MODEL       model name
 #   COGCOG_FAST_MODEL  model for --raw fast path
 #   COGCOG_MAX_TOKENS  max tokens       (default: 8192)
 #   COGCOG_SYSTEM      system prompt    (optional)
-#
-# Backend defaults:
-#   anthropic: ANTHROPIC_API_KEY, claude-sonnet-4-20250514
-#   openai:    OPENAI_API_KEY, gpt-4o (set COGCOG_API_URL for OpenRouter/Ollama/Groq)
-#   codex:     reads OAuth from pi's auth.json — no API key needed. default: gpt-5.4
-#   copilot:   reads OAuth from pi's auth.json — no API key needed
-#              default: claude-opus-4.6, fast: claude-sonnet-4.6
-#   pi:        delegates to `pi -p` (slower startup, any pi provider)
 
 set -euo pipefail
 
-# delegate to another CLI if COGCOG_CMD is set
-# pass --raw to bypass and use the built-in API client (uses COGCOG_FAST_MODEL)
 _RAW=0
 if [[ "${1:-}" == "--raw" ]]; then
   _RAW=1
@@ -38,193 +27,18 @@ elif [[ -n "${COGCOG_CMD:-}" ]]; then
   exec $COGCOG_CMD "$@"
 fi
 
-BACKEND="${COGCOG_BACKEND:-anthropic}"
 MAX_TOKENS="${COGCOG_MAX_TOKENS:-8192}"
 SYSTEM="${COGCOG_SYSTEM:-}"
 
-# --raw uses COGCOG_FAST_MODEL (for quick ask), otherwise COGCOG_MODEL
 if [[ $_RAW -eq 1 && -n "${COGCOG_FAST_MODEL:-}" ]]; then
-  _DEFAULT_MODEL="$COGCOG_FAST_MODEL"
+  MODEL="${COGCOG_FAST_MODEL}"
+  API_URL="${COGCOG_FAST_API_URL:-${COGCOG_API_URL:-http://localhost:8091/v1/chat/completions}}"
 else
-  _DEFAULT_MODEL="${COGCOG_MODEL:-}"
+  MODEL="${COGCOG_MODEL:-gemma4:26b}"
+  API_URL="${COGCOG_API_URL:-http://localhost:8091/v1/chat/completions}"
 fi
 
-# ============================================================================
-# Shared auth helpers — read/refresh pi's OAuth tokens with plain curl+jq
-# ============================================================================
-_PI_AUTH="${COGCOG_PI_AUTH:-$HOME/.pi/agent/auth.json}"
-
-pi_auth_read() {
-  # Usage: pi_auth_read <provider-key>
-  # Sets: _AUTH_ACCESS, _AUTH_REFRESH, _AUTH_EXPIRES
-  local key="$1"
-  if [[ ! -f "$_PI_AUTH" ]]; then
-    echo "cogcog: $BACKEND backend requires pi auth — run: pi /login" >&2
-    return 1
-  fi
-  local entry
-  entry=$(jq -r ".\"$key\" // empty" "$_PI_AUTH")
-  if [[ -z "$entry" ]]; then
-    echo "cogcog: no $key credentials in $_PI_AUTH — run: pi /login" >&2
-    return 1
-  fi
-  _AUTH_ACCESS=$(echo "$entry" | jq -r '.access')
-  _AUTH_REFRESH=$(echo "$entry" | jq -r '.refresh')
-  _AUTH_EXPIRES=$(echo "$entry" | jq -r '.expires')
-}
-
-pi_auth_expired() {
-  local now_ms
-  now_ms=$(date +%s)000
-  (( _AUTH_EXPIRES - now_ms < 60000 ))
-}
-
-pi_auth_write() {
-  # Usage: pi_auth_write <provider-key> <jq-update-expr>
-  local key="$1" expr="$2"
-  local tmp_auth
-  tmp_auth=$(mktemp)
-  jq "$expr" "$_PI_AUTH" > "$tmp_auth" && mv "$tmp_auth" "$_PI_AUTH"
-}
-
-# ============================================================================
-# Codex auth
-# ============================================================================
-_CODEX_CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"
-_CODEX_TOKEN_URL="https://auth.openai.com/oauth/token"
-
-codex_ensure_token() {
-  pi_auth_read "openai-codex" || return 1
-  _CODEX_ACCOUNT=$(jq -r '."openai-codex".accountId' "$_PI_AUTH")
-
-  if pi_auth_expired; then
-    local resp new_access new_refresh expires_in new_expires account_id
-    resp=$(curl -sS "$_CODEX_TOKEN_URL" \
-      -H "Content-Type: application/x-www-form-urlencoded" \
-      -d "grant_type=refresh_token&refresh_token=${_AUTH_REFRESH}&client_id=${_CODEX_CLIENT_ID}")
-
-    new_access=$(echo "$resp" | jq -r '.access_token // empty')
-    if [[ -z "$new_access" ]]; then
-      echo "cogcog: codex token refresh failed — run: pi /login" >&2
-      return 1
-    fi
-
-    new_refresh=$(echo "$resp" | jq -r '.refresh_token')
-    expires_in=$(echo "$resp" | jq -r '.expires_in')
-    new_expires=$(( $(date +%s) * 1000 + expires_in * 1000 ))
-
-    # Extract accountId from JWT
-    local payload
-    payload=$(echo "$new_access" | cut -d. -f2 | base64 -d 2>/dev/null || true)
-    account_id=$(echo "$payload" | jq -r '.["https://api.openai.com/auth"].chatgpt_account_id // empty')
-    [[ -z "$account_id" ]] && account_id="$_CODEX_ACCOUNT"
-
-    pi_auth_write "openai-codex" \
-      --arg a "$new_access" --arg r "$new_refresh" --argjson e "$new_expires" --arg id "$account_id" \
-      '."openai-codex".access=$a | ."openai-codex".refresh=$r | ."openai-codex".expires=$e | ."openai-codex".accountId=$id'
-
-    _AUTH_ACCESS="$new_access"
-    _CODEX_ACCOUNT="$account_id"
-  fi
-}
-
-# ============================================================================
-# Copilot auth
-# ============================================================================
-_COPILOT_HEADERS=(
-  -H "User-Agent: GitHubCopilotChat/0.35.0"
-  -H "Editor-Version: vscode/1.107.0"
-  -H "Editor-Plugin-Version: copilot-chat/0.35.0"
-  -H "Copilot-Integration-Id: vscode-chat"
-)
-
-copilot_base_url_from_token() {
-  # Extract proxy-ep from copilot token → api base URL
-  local token="$1"
-  local proxy_ep
-  proxy_ep=$(echo "$token" | grep -oP 'proxy-ep=\K[^;]+' || true)
-  if [[ -n "$proxy_ep" ]]; then
-    echo "https://$(echo "$proxy_ep" | sed 's/^proxy\./api./')"
-  else
-    echo "https://api.individual.githubcopilot.com"
-  fi
-}
-
-copilot_ensure_token() {
-  pi_auth_read "github-copilot" || return 1
-
-  if pi_auth_expired; then
-    # refresh = GitHub access token, exchange for new copilot token
-    local resp new_token expires_at new_expires
-    resp=$(curl -sS "https://api.github.com/copilot_internal/v2/token" \
-      -H "Authorization: Bearer $_AUTH_REFRESH" \
-      -H "Accept: application/json" \
-      "${_COPILOT_HEADERS[@]}")
-
-    new_token=$(echo "$resp" | jq -r '.token // empty')
-    if [[ -z "$new_token" ]]; then
-      echo "cogcog: copilot token refresh failed — run: pi /login" >&2
-      return 1
-    fi
-
-    expires_at=$(echo "$resp" | jq -r '.expires_at')
-    # expires_at is unix seconds; store as ms with 5min buffer (matching pi)
-    new_expires=$(( expires_at * 1000 - 5 * 60 * 1000 ))
-
-    pi_auth_write "github-copilot" \
-      --arg a "$new_token" --argjson e "$new_expires" \
-      '."github-copilot".access=$a | ."github-copilot".expires=$e'
-
-    _AUTH_ACCESS="$new_token"
-  fi
-
-  _COPILOT_BASE_URL=$(copilot_base_url_from_token "$_AUTH_ACCESS")
-}
-
-# ============================================================================
-# Backend configuration
-# ============================================================================
-case "$BACKEND" in
-  anthropic)
-    API_KEY="${COGCOG_API_KEY:-${ANTHROPIC_API_KEY:-}}"
-    API_URL="${COGCOG_API_URL:-https://api.anthropic.com/v1/messages}"
-    MODEL="${_DEFAULT_MODEL:-claude-sonnet-4-20250514}"
-    ;;
-  openai)
-    API_KEY="${COGCOG_API_KEY:-${OPENAI_API_KEY:-}}"
-    API_URL="${COGCOG_API_URL:-https://api.openai.com/v1/chat/completions}"
-    MODEL="${_DEFAULT_MODEL:-gpt-4o}"
-    ;;
-  codex)
-    MODEL="${_DEFAULT_MODEL:-gpt-5.4}"
-    API_URL="${COGCOG_API_URL:-https://chatgpt.com/backend-api/codex/responses}"
-    codex_ensure_token
-    API_KEY="$_AUTH_ACCESS"
-    ;;
-  copilot)
-    if [[ $_RAW -eq 1 && -z "${COGCOG_FAST_MODEL:-}" ]]; then
-      MODEL="${_DEFAULT_MODEL:-claude-sonnet-4.6}"
-    else
-      MODEL="${_DEFAULT_MODEL:-claude-opus-4.6}"
-    fi
-    copilot_ensure_token
-    API_KEY="$_AUTH_ACCESS"
-    API_URL="${COGCOG_API_URL:-${_COPILOT_BASE_URL}/v1/messages}"
-    ;;
-  pi)
-    MODEL="${_DEFAULT_MODEL:-gpt-5.4}"
-    PI_PROVIDER="${COGCOG_PI_PROVIDER:-openai-codex}"
-    ;;
-  *)
-    echo "cogcog: unknown backend '$BACKEND' (use anthropic, openai, codex, copilot, or pi)" >&2
-    exit 1
-    ;;
-esac
-
-if [[ "$BACKEND" != "pi" && "$BACKEND" != "codex" && "$BACKEND" != "copilot" && -z "${API_KEY:-}" ]]; then
-  echo "cogcog: no API key (set COGCOG_API_KEY or backend-specific env var)" >&2
-  exit 1
-fi
+API_KEY="${COGCOG_API_KEY:-${OPENAI_API_KEY:-dummy}}"
 
 # read stdin
 tmp=$(mktemp)
@@ -238,134 +52,32 @@ fi
 
 input=$(<"$tmp")
 
-# --- pi backend: delegate to pi -p and exit early ---
-if [[ "$BACKEND" == "pi" ]]; then
-  pi_args=(
-    -p
-    --no-tools
-    --no-session
-    --provider "$PI_PROVIDER"
-    --model "$MODEL"
-  )
-  if [[ -n "$SYSTEM" ]]; then
-    pi_args+=(--system-prompt "$SYSTEM")
-  fi
-  prompt_file=$(mktemp "${TMPDIR:-/tmp}/cogcog-prompt.XXXXXX")
-  printf '%s' "$input" > "$prompt_file"
-  pi "${pi_args[@]}" "@$prompt_file" || {
-    rc=$?
-    rm -f "$prompt_file"
-    exit $rc
-  }
-  rm -f "$prompt_file"
-  exit 0
+# build request
+if [[ -n "$SYSTEM" ]]; then
+  body=$(jq -n \
+    --arg model "$MODEL" \
+    --argjson max_tokens "$MAX_TOKENS" \
+    --arg system "$SYSTEM" \
+    --arg content "$input" \
+    '{model: $model, max_tokens: $max_tokens, stream: true,
+      messages: [{role: "system", content: $system}, {role: "user", content: $content}]}')
+else
+  body=$(jq -n \
+    --arg model "$MODEL" \
+    --argjson max_tokens "$MAX_TOKENS" \
+    --arg content "$input" \
+    '{model: $model, max_tokens: $max_tokens, stream: true,
+      messages: [{role: "user", content: $content}]}')
 fi
 
-# ============================================================================
-# Build request body
-# ============================================================================
-case "$BACKEND" in
-  anthropic|copilot)
-    # Both use Anthropic Messages API format
-    if [[ -n "$SYSTEM" ]]; then
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --argjson max_tokens "$MAX_TOKENS" \
-        --arg system "$SYSTEM" \
-        --arg content "$input" \
-        '{model: $model, max_tokens: $max_tokens, system: $system, stream: true,
-          messages: [{role: "user", content: $content}]}')
-    else
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --argjson max_tokens "$MAX_TOKENS" \
-        --arg content "$input" \
-        '{model: $model, max_tokens: $max_tokens, stream: true,
-          messages: [{role: "user", content: $content}]}')
-    fi
-    if [[ "$BACKEND" == "copilot" ]]; then
-      curl_args=(
-        -H "Authorization: Bearer $API_KEY"
-        -H "anthropic-version: 2023-06-01"
-        "${_COPILOT_HEADERS[@]}"
-        -H "X-Initiator: user"
-        -H "Openai-Intent: conversation-edits"
-      )
-    else
-      curl_args=(
-        -H "x-api-key: $API_KEY"
-        -H "anthropic-version: 2023-06-01"
-      )
-    fi
-    ;;
-  openai)
-    if [[ -n "$SYSTEM" ]]; then
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --argjson max_tokens "$MAX_TOKENS" \
-        --arg system "$SYSTEM" \
-        --arg content "$input" \
-        '{model: $model, max_tokens: $max_tokens, stream: true,
-          messages: [{role: "system", content: $system}, {role: "user", content: $content}]}')
-    else
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --argjson max_tokens "$MAX_TOKENS" \
-        --arg content "$input" \
-        '{model: $model, max_tokens: $max_tokens, stream: true,
-          messages: [{role: "user", content: $content}]}')
-    fi
-    curl_args=(
-      -H "Authorization: Bearer $API_KEY"
-    )
-    ;;
-  codex)
-    if [[ -n "$SYSTEM" ]]; then
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --arg instructions "$SYSTEM" \
-        --arg content "$input" \
-        '{model: $model, store: false, stream: true,
-          instructions: $instructions,
-          input: [{role: "user", content: [{type: "input_text", text: $content}]}]}')
-    else
-      body=$(jq -n \
-        --arg model "$MODEL" \
-        --arg content "$input" \
-        '{model: $model, store: false, stream: true,
-          input: [{role: "user", content: [{type: "input_text", text: $content}]}]}')
-    fi
-    curl_args=(
-      -H "Authorization: Bearer $API_KEY"
-      -H "chatgpt-account-id: $_CODEX_ACCOUNT"
-      -H "OpenAI-Beta: responses=experimental"
-      -H "accept: text/event-stream"
-    )
-    ;;
-esac
-
-# ============================================================================
-# Stream response
-# ============================================================================
-case "$BACKEND" in
-  anthropic|copilot)
-    jq_filter='select(.type == "content_block_delta") | .delta.text // empty'
-    ;;
-  openai)
-    jq_filter='.choices[0].delta.content // empty'
-    ;;
-  codex)
-    jq_filter='select(.type == "response.output_text.delta") | .delta // empty'
-    ;;
-esac
-
+# stream response
 curl -sS -N "$API_URL" \
-  "${curl_args[@]}" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "content-type: application/json" \
   -d "$body" 2>/dev/null \
 | sed -n -u 's/^data: //p' \
 | grep -v --line-buffered '^\[DONE\]$' \
-| jq -j --unbuffered -r "$jq_filter" 2>/dev/null \
+| jq -j --unbuffered -r '.choices[0].delta.content // empty' 2>/dev/null \
 | {
   output=""
   while IFS= read -r -d '' -n 1 char || [[ -n "$char" ]]; do
