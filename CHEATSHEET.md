@@ -1,103 +1,106 @@
 # cogcog cheatsheet
 
-## Verbs (all 0.3s via bundled raw transport)
+## Stable with the bundled pi extension
 
 ```text
-gaip / gaa          explain (no prompt, instant)
-1gaip               one sentence
-3gaip               detailed
-Visual ga           ask with prompt
-gsip / gss          generate → code buffer
-<leader>grip        refactor (small = inline, large = review buffer)
+ga{motion} / gaa   ask / explain
+Visual ga          ask a specific question about selection
+
+gs{motion} / gss   generate from scoped text
+Visual gs          generate from selection
+
+<leader>gr{motion} refactor scoped text
+Visual <leader>gr  refactor selection
+
+<leader>gc{motion} check / review scoped text
+Visual <leader>gc  check selection
+
+<C-g>              plan / continue
+<leader>gx         execute prompt from Neovim -> pi
+<leader>gy         pin selection to workbench
+<leader>co         toggle workbench
+<leader>cc         clear workbench
 ```
 
-## Deeper / optional verbs
+## Typical loop
 
 ```text
-<leader>gcip        check
-<leader>cd          discover project
+Terminal 1: nvim
+Terminal 2: pi
+/reload
+/cogcog-claim
+
+In nvim:
+  gaip
+  gsip
+  <leader>grip
+  <leader>gcaf
+  <C-g>
+  <leader>gx
 ```
 
-## Context from vim state
+If nothing reaches pi, check:
 
 ```text
-<leader>gj          jump trail
-<leader>g.          recent changes
-<leader>gq          summarize quickfix
-<leader>gQ          review quickfix
-<leader>gR          review/apply quickfix rewrite
+/cogcog-status
 ```
 
-`ga` auto-includes visible windows + quickfix.
+## What pi gets
 
-## Planning (workbench + tools)
+Each CogCog-triggered turn comes with live Neovim context:
 
 ```text
-<C-g>               plan / synthesize (with tool calling)
-<C-g> (in workbench) send as-is
+- current buffer + cursor
+- visible windows
+- quickfix entries
+- diagnostics summary
+- nearby lines around cursor
+```
+
+And pi can use:
+
+```text
+nvim_context
+nvim_buffer
+nvim_buffers
+nvim_diagnostics
+nvim_goto
+nvim_quickfix
+nvim_exec
+nvim_notify
 ```
 
 ## Workbench
 
 ```text
-<leader>gy          pin selection
-<leader>co          toggle workbench
-<leader>cc          clear workbench
-<leader>g!          exec command → workbench
-<leader>ct          run project tool → workbench
-<leader>cT          generate new tool → review → save
-<leader>cp          improve prompt from bad response
-<C-c>               cancel
-a                   apply review buffer
-q                   close split
+<leader>co         open / close [cogcog-workbench]
+<leader>gy         append selection to workbench
+<C-g>              continue from current file / workbench
+<leader>cc         wipe workbench + .cogcog/workbench.md
 ```
 
-## Pi integration (separate terminal)
+## pi bridge commands
 
 ```text
-Terminal 1: nvim    fast verbs, editing
-Terminal 2: pi      agent work, multi-file changes
+/cogcog-claim      this pi session receives events
+/cogcog-release    release event ownership
+/cogcog-status     socket / channel / owner / claimed state
 ```
 
-Pi sees your Neovim state via the cogcog bridge extension.
+## Internal event hook
+
+Every forwarded action also emits a local Neovim event:
+
+```text
+User CogcogEvent
+vim.g.cogcog_last_event
+```
+
+## Shell helper
 
 ```bash
-ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+echo "explain this" | cogcog
+cat src/main.ts | cogcog --raw
 ```
 
-Optional `nv` helper:
-
-```bash
-nv status                   check connection
-nv context                  buffer, cursor, windows, diagnostics
-nv buffer [path]            read buffer content
-nv buffers                  list loaded buffers
-nv diagnostics [path]       LSP diagnostics
-nv goto <path> [line]       navigate to file
-nv eval <lua-expr>          arbitrary Lua
-```
-
-## Config
-
-```text
-COGCOG_BACKEND      copilot (recommended), codex, anthropic, openai, pi
-COGCOG_FAST_MODEL   fast model for bundled transport
-COGCOG_CHECKER      optional stronger review/discovery command
-COGCOG_KB           knowledge base path (for discovery KB insights)
-COGCOG_NVIM_SOCKET  Neovim server socket (default: /tmp/cogcog.sock)
-```
-
-## Combos
-
-```text
-gaip                instant explain
-gaa                 explain entire buffer
-gd → gaip           definition → explain
-:make → gaip        errors → explain
-<leader>gj          investigate jump trail
-<leader>g.          review changes
-gsip → <leader>gcip generate → verify
-<C-g>               plan in workbench (tools available)
-<leader>cd → gf     discover → navigate
-<leader>cT → <leader>ct  create tool → reuse it
-```
+See `README.md` for env vars and setup.

@@ -1,242 +1,215 @@
-*cogcog.txt*    LLM as a vim verb
+*cogcog.txt*    Cogcog Neovim bridge for pi
 
 INTRODUCTION                                    *cogcog*
 
-cogcog adds LLM verbs to vim. They compose with motions and text
-objects. Most verbs run at 0.3s via the bundled raw transport.
-External checker commands are optional.
+cogcog turns vim motions and selections into structured events for pi.
+It is a Neovim-side operator layer plus a small RPC bridge.
 
-Note: `ga` overrides show-ASCII, `gs` overrides sleep,
-`<C-g>` overrides show-file-info.
+Typical setup: >
+    Terminal 1: nvim
+    Terminal 2: pi
+    /cogcog-claim
+<
+
+With the bundled pi extension, these event types are forwarded to pi:
+    ask, generate, refactor, check, plan, execute
+
+Every event is also exposed locally via |User| `CogcogEvent` and
+`vim.g.cogcog_last_event`, so custom listeners can build on top.
 
 FAST VERBS                                      *cogcog-verbs*
 
                                                 *cogcog-ga*
-ga{motion}      Explain code. No prompt. Count = verbosity:
-                  gaip = concise, 1gaip = 1 sentence, 3gaip = detailed
-                Auto-includes visible windows and quickfix.
-                Workbench open = continues there. Closed = stateless.
-                Visual: prompted.
+ga{motion}      Emit an ask / explain event for the scoped text.
+                Count changes the built-in ask wording:
+                  gaip = normal
+                  1gaip = shorter ask
+                  3gaip = more detailed ask
+                Visual `ga` prompts for an explicit question.
 
                                                 *cogcog-gaa*
-gaa             Explain entire buffer.
+gaa             Emit an ask / explain event for the whole buffer.
 
                                                 *cogcog-gs*
-gs{motion}      Generate code. Raw API (fast). Output in code buffer.
-                Includes workbench content when present.
-                Auto-detects language, strips fences. :w to save.
+gs{motion}      Emit a generate event for the scoped text.
+                Visual `gs` prompts for an instruction.
 
                                                 *cogcog-gss*
-gss             Generate from entire buffer.
+gss             Emit a generate event for the whole buffer.
 
                                                 *cogcog-gr*
 <leader>gr{motion}
-                Refactor in-place. Small rewrites apply directly
-                (u to undo). Larger rewrites open a review buffer
-                with a unified diff. Press 'a' to apply.
-
-DEEPER / OPTIONAL VERBS                         *cogcog-cloud*
+                Emit a refactor event for the scoped text.
+                The payload includes exact target file + line range.
+                Visual mode refactors the selected range.
 
                                                 *cogcog-gc*
 <leader>gc{motion}
-                Check code. By default uses the bundled cogcog
-                transport. Set COGCOG_CHECKER to use a different
-                command. Split reused.
-
-                                                *cogcog-gx*
-<leader>gx      Reminder to use pi in the other terminal.
-                Pi connects to Neovim via the cogcog bridge and
-                has full editor awareness. See |cogcog-pi|.
-
-                                                *cogcog-cd*
-<leader>cd      Discover project. Writes .cogcog/discovery.md
-                (gf-navigable). Pre-computes stats in Lua, model
-                fills in architecture and module tables.
+                Emit a check / review event for the scoped text.
+                Visual mode checks the selection.
 
 PLANNING                                        *cogcog-plan*
 
                                                 *cogcog-ctrl-g*
-<C-g>           Fast workbench synthesis (raw API, 0.3s).
-                From code: prompts, shows current filename.
-                From workbench: sends the current workbench as-is.
-                The model can request tool calls during synthesis.
-                Each call appears in the workbench for approval.
+<C-g>           Emit a plan / continue event.
+                From a normal file, prompts for a short request.
+                From the workbench, means “continue from here”.
 
-                                                *cogcog-tool-mode*
-                Set `vim.g.cogcog_tool_mode` to control approval:
-                  "ask"   (default) approve every tool call
-                  "read"  auto-approve read-only, ask for commands
-                  "trust" auto-approve all for this turn
-
-                                                *cogcog-cy*
-<leader>gy      (visual) Pin selection to workbench.
-<leader>g!      Execute a shell command; output streams to the workbench.
-                Opens workbench automatically. Cancellable with <C-c>.
-<leader>ct      Pick and run a project tool from `.cogcog/tools/`.
-                Output streams to the workbench. Tools are plain scripts.
-<leader>cT      Generate a new tool. Describe what you need, review the
-                generated script, press `a` to save to `.cogcog/tools/`.
-
-VIM STATE AS CONTEXT                            *cogcog-context*
-
-                                                *cogcog-gj*
-<leader>gj      Jump trail. Last 8 locations. Reuses ask split.
-
-                                                *cogcog-g-dot*
-<leader>g.      Recent changes. Reuses ask split.
-
-                                                *cogcog-gq*
-<leader>gq      Summarize the current quickfix target set.
-
-                                                *cogcog-gQ*
-<leader>gQ      Review and prioritize the current quickfix target set.
-
-                                                *cogcog-gR*
-<leader>gR      Prepare rewrites for the current quickfix target set.
-                Opens a review buffer with diffs. Press 'a' to apply
-                all prepared rewrites. Targets that changed since
-                review are skipped.
-
-ga auto-includes visible windows and quickfix.
-
-Scope model:
-    hard scope      explicit operand or quickfix target set
-    explicit import workbench contents and pinned snippets
-    soft context    visible windows for grounding only
-
-Quickfix is the deliberate batch boundary when present.
+                                                *cogcog-gx*
+<leader>gx      Prompt in Neovim, then emit an execute event to pi.
+                Use this for direct do-work instructions.
 
 WORKBENCH                                       *cogcog-workbench* *cogcog-panel*
 
+cogcog keeps a persistent scratch buffer named `[cogcog-workbench]`.
+Use it to collect snippets, write notes, and anchor longer pi turns.
+
                                                 *cogcog-co*
-<leader>co      Toggle workbench. Open = ga can continue there.
->
-                :read .cogcog/review.md     add skill
-                :read !git diff             add tool output
-                dap                         delete section
-<
+<leader>co      Toggle the workbench window.
+
+                                                *cogcog-cy*
+<leader>gy      In visual mode, append the selection to the workbench.
+
                                                 *cogcog-cc*
-<leader>cc      Clear workbench and persisted workbench file.
+<leader>cc      Clear the workbench and delete `.cogcog/workbench.md`.
 
-                                                *cogcog-cp*
-<leader>cp      Improve prompt from bad response.
-
-                                                *cogcog-cancel*
-<C-c>           Cancel jobs. Pass-through when idle.
+Workbench state persists across editor exits in: >
+    .cogcog/workbench.md
+<
 
 PI INTEGRATION                                  *cogcog-pi*
 
-cogcog auto-starts a Neovim server socket on load:
->
+cogcog auto-starts a Neovim server socket on load: >
     /tmp/cogcog.sock        (or COGCOG_NVIM_SOCKET)
 <
-A pi extension connects to this socket and gives pi full editor
-awareness. Pi runs in a separate terminal — no wrappers needed.
 
-Install the extension:
->
+Install the bundled pi extension: >
+    cd /path/to/cogcog/pi-extension
+    npm install
     ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 <
-Pi auto-injects Neovim context into every prompt and registers tools:
-    nvim_context        buffer, cursor, windows, quickfix, diagnostics
-    nvim_buffer         read buffer content
-    nvim_buffers        list loaded buffers
-    nvim_diagnostics    LSP diagnostics
-    nvim_goto           open file at line in Neovim
-    nvim_quickfix       set quickfix items in the editor
-    nvim_exec           run a vim command
-    nvim_notify         send a notification to Neovim
 
-Optional `nv` helper for scripts and skills:
->
-    nv status                   check connection
-    nv context                  full editor state (JSON)
-    nv buffer [path]            read buffer content
-    nv buffers                  list loaded buffers
-    nv diagnostics [path]       LSP diagnostics
-    nv goto <path> [line]       navigate user to file
-    nv eval <lua-expr>          arbitrary Lua
+Inside pi: >
+    /reload
+    /cogcog-claim
+    /cogcog-status
 <
-See `skills/nvim-bridge/SKILL.md` for full reference.
+
+Only the claimed pi session receives live Cogcog events.
+
+The extension injects current editor state before each Cogcog-triggered turn:
+    - current buffer + cursor
+    - visible windows
+    - quickfix list
+    - diagnostics summary
+    - nearby lines around the cursor
+
+It also registers these tools for pi:
+    nvim_context
+    nvim_buffer
+    nvim_buffers
+    nvim_diagnostics
+    nvim_goto
+    nvim_quickfix
+    nvim_exec
+    nvim_notify
+
+If no pi session is listening, cogcog warns in Neovim instead of silently
+pretending work happened.
+
+LOCAL EVENT HOOKS                               *cogcog-events*
+
+Every emit also triggers a local Neovim event: >
+    :autocmd User CogcogEvent lua print(vim.inspect(vim.v.event.data))
+<
+
+The last emitted payload is also stored in: >
+    vim.g.cogcog_last_event
+<
+
+You do not need this for the normal bundled workflow, but it is available
+for custom listeners and automations.
+
+SHELL FILTER                                    *cogcog-shell* *cogcog-backend*
+
+This repo also ships `bin/cogcog`, a separate stdin -> LLM -> stdout helper.
+It is independent from the Neovim event flow.
+
+Examples: >
+    echo "explain this" | cogcog
+    cat src/main.ts | cogcog --raw
+    git diff --staged | cogcog "review this"
+<
 
 CONFIGURATION                                   *cogcog-config*
 
-Default behavior:
-    ga/gs/gr/<C-g>/gc/cd use the bundled cogcog command.
-    No external harness is required for the core loop.
-
-Optional overrides:
-    gc/discover     COGCOG_CHECKER (explicit stronger review/discovery command)
-
-                                                *cogcog-backend*
-COGCOG_BACKEND      "anthropic", "openai", "codex", "copilot", or "pi"
-                (default: anthropic)
-                codex: reads pi's Codex OAuth, calls API with curl (18ms).
-                copilot: reads pi's Copilot OAuth, calls API with curl (14ms).
-                  smart model: claude-opus-4.6
-                  fast model (--raw): claude-sonnet-4.6
-                pi: delegates to `pi -p` (~0.7s startup).
-
-                                                *cogcog-fast-model*
-COGCOG_FAST_MODEL   Fast model for most verbs via the bundled cogcog command.
-
-                                                *cogcog-checker*
-COGCOG_CHECKER      Optional stronger command for check/discover.
-                When unset, check/discover fall back to cogcog --raw.
-
-                                                *cogcog-api-url*
-COGCOG_API_URL      API endpoint (anthropic/openai backends only).
-
-                                                *cogcog-api-key*
-COGCOG_API_KEY      API key (anthropic/openai backends only).
-
-                                                *cogcog-model*
-COGCOG_MODEL        Default model when FAST_MODEL not set.
-
-                                                *cogcog-max-tokens*
-COGCOG_MAX_TOKENS   Max tokens (default 8192).
+Neovim / bridge config:
 
                                                 *cogcog-nvim-socket*
-COGCOG_NVIM_SOCKET  Neovim server socket path (default /tmp/cogcog.sock).
-                Used by the pi extension and nv CLI tool.
+COGCOG_NVIM_SOCKET  Neovim server socket path for the pi bridge.
+                Default: `/tmp/cogcog.sock`.
+
+Shell helper config (`bin/cogcog`):
+
+                                                *cogcog-cmd*
+COGCOG_CMD      Delegate `cogcog` to another CLI.
+
+                                                *cogcog-api-url*
+COGCOG_API_URL      Default API endpoint.
+
+                                                *cogcog-fast-api-url*
+COGCOG_FAST_API_URL API endpoint for `--raw` fast path.
+
+                                                *cogcog-api-key*
+COGCOG_API_KEY      API key.
+OPENAI_API_KEY      Fallback API key.
+
+                                                *cogcog-model*
+COGCOG_MODEL        Default model name.
+
+                                                *cogcog-fast-model*
+COGCOG_FAST_MODEL   Model name for `--raw`.
+
+                                                *cogcog-max-tokens*
+COGCOG_MAX_TOKENS   Max tokens. Default: 8192.
+
+                                                *cogcog-system*
+COGCOG_SYSTEM       Optional system prompt for `bin/cogcog`.
 
 PROJECT FILES                                   *cogcog-project*
 
-.cogcog/system.md       System prompt. Shared by all verbs.
-.cogcog/workbench.md    Auto-saved/restored workbench.
-.cogcog/discovery.md    Project map.
-.cogcog/tools/          Project-local tools (bash/lua scripts).
+.cogcog/workbench.md    Persisted workbench scratchpad.
+lua/cogcog/init.lua     Keymaps and event emission.
+lua/cogcog/context.lua  Scope builders and workbench helpers.
+lua/cogcog/transport.lua  Event emit + `User CogcogEvent`.
+lua/cogcog/bridge.lua   RPC surface used by the pi extension.
+pi-extension/           Bundled pi extension.
+bin/cogcog              Shell filter.
 
 QUICK REFERENCE                                 *cogcog-cheatsheet*
 
-Fast (0.3s): >
-    gaip / gaa      explain
-    Visual ga       ask
-    gsip / gss      generate
-    <leader>grip    refactor
-    <C-g>           plan / synthesize
-    <leader>gj      jumps
-    <leader>g.      changes
-    <leader>gq      quickfix summary
-    <leader>gQ      quickfix review
-    <leader>gR      quickfix rewrite
+Bundled pi bridge: >
+    ga{motion} / gaa    ask / explain
+    Visual ga           ask question about selection
+    gs{motion} / gss    generate
+    <leader>gr{motion}  refactor
+    <leader>gc{motion}  check / review
+    <C-g>               plan / continue
+    <leader>gx          execute prompt -> pi
+    <leader>gy          pin to workbench
+    <leader>co          toggle workbench
+    <leader>cc          clear workbench
 <
-Optional: >
-    <leader>gcip    check
-    <leader>gx      use pi in other terminal
-    <leader>cd      discover
+
+pi commands: >
+    /cogcog-claim
+    /cogcog-release
+    /cogcog-status
 <
-Other: >
-    <leader>gy      pin
-    <leader>co      workbench
-    <leader>g!      exec → workbench
-    <leader>ct      run project tool
-    <leader>cT      generate tool
-    <leader>cp      improve prompt
-    <leader>cc      clear
-    <C-c>           cancel
-    a               apply review buffer
-    q               close split
+
+Internal hook: >
+    User CogcogEvent
+    vim.g.cogcog_last_event
 <
 
  vim:tw=78:ts=8:ft=help:norl:

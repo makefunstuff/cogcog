@@ -2,65 +2,92 @@
 
 SETUP                                           *cogcog-tutorial-setup*
 >
-    export COGCOG_BACKEND=copilot
-    export COGCOG_CHECKER="..."      " optional stronger check/discover cmd
+    cd /path/to/cogcog/pi-extension && npm install
+    ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 <
-Neovim: >
-    open any code file and try: gaip
+Inside pi: >
+    /reload
+    /cogcog-claim
+    /cogcog-status
 <
+Neovim: open any code file and try: >
+    gaip
+<
+If no pi session is listening, Neovim warns instead of hiding it.
 
-EXPLAIN (0.3s)                                  *cogcog-tutorial-ask*
+ASK / EXPLAIN                                   *cogcog-tutorial-ask*
 >
-    gaip            concise (no prompt)
-    gaa             entire buffer
-    3gaip           detailed
-    Visual ga       prompted question
+    gaip            ask about inner paragraph
+    gaa             ask about entire buffer
+    3gaip           more detailed ask wording
+    Visual ga       prompted question about selection
 <
+These emit an `ask` event to the claimed pi session.
 
-PLAN (workbench + tools)                        *cogcog-tutorial-plan*
+GENERATE                                        *cogcog-tutorial-gen*
 >
-    <C-g> → "add rate limiting"
-    <C-g> → "use token bucket"
-    <leader>gy      pin selection
+    gsip            generate from scoped text
+    gss             generate from whole buffer
+    Visual gs       generate from selection
 <
-
-GENERATE (0.3s)                                 *cogcog-tutorial-gen*
->
-    gsaf → "implement it"
-    :w src/file.ts
-<
+These emit a `generate` event.
 
 REFACTOR                                        *cogcog-tutorial-refactor*
 >
-    <leader>graf → "simplify"       u to undo
-    large rewrites open review       a apply / q close
+    <leader>grip    refactor scoped text
+    Visual <leader>gr
 <
+The event includes exact target file + line range for pi.
 
 CHECK                                           *cogcog-tutorial-check*
 >
     <leader>gcaf
-    uses cogcog --raw unless COGCOG_CHECKER is set
+    Visual <leader>gc
 <
+These emit a `check` event for correctness / edge-case review.
 
-PI (other terminal)                             *cogcog-tutorial-exec*
+EXECUTE / PLAN / WORKBENCH                      *cogcog-tutorial-plan*
 >
-    ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+    <leader>gx      execute prompt -> pi
+    <leader>co      open workbench
+    <leader>gy      pin selection
+    <C-g>           plan / continue
+    <leader>cc      clear workbench
+<
+Workbench persists in `.cogcog/workbench.md`.
+
+PI BRIDGE                                       *cogcog-tutorial-pi*
+>
     Terminal 1: nvim
     Terminal 2: pi
-    <leader>gx        reminder: use pi in the other terminal
+<
+The bundled extension injects live editor state into pi and registers:
+>
+    nvim_context
+    nvim_buffer
+    nvim_buffers
+    nvim_diagnostics
+    nvim_goto
+    nvim_quickfix
+    nvim_exec
+    nvim_notify
 <
 
-INVESTIGATE                                     *cogcog-tutorial-investigate*
+INTERNAL EVENT HOOK                             *cogcog-tutorial-events*
 >
-    <leader>gj          jump trail
-    <leader>g.          recent changes
-    <leader>gQ          review quickfix
-    <leader>gR          rewrite quickfix targets
+    User CogcogEvent
+    vim.g.cogcog_last_event
 <
+The bundled pi extension forwards ask/generate/refactor/check/plan/execute.
+The hook is there if you ever want a custom listener later.
 
-ITERATE                                         *cogcog-tutorial-iterate*
+SHELL                                           *cogcog-tutorial-shell*
 >
-    :make → gaip → gsaf → :make → <leader>gcaf
+    export COGCOG_API_URL=http://localhost:8091/v1/chat/completions
+    export COGCOG_MODEL=gemma4:26b
+    export OPENAI_API_KEY=dummy
+    echo "explain this diff" | cogcog
+    cat src/main.ts | cogcog --raw
 <
 
  vim:tw=78:ts=8:ft=help:norl:

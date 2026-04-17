@@ -1,230 +1,277 @@
 # Usage & Tricks
 
-## Fast verbs (0.3s, raw API)
+This file is the practical cookbook for Cogcog as it exists today:
 
-### Instant explain
+- Neovim defines scope
+- Cogcog emits an event
+- pi receives it in another terminal
+- pi uses `nvim_*` tools when it needs more context
 
-```text
-gaip             what does this paragraph do?
-gaf              what does this function do?
-gaa              walk me through this entire file
-1gaip            one sentence
-3gaip            detailed with examples
-```
+For setup, see `README.md`.
 
-No prompt. Includes visible windows + quickfix automatically.
-
-### Ask with a question
+## Minimal loop
 
 ```text
-Visual select → ga → "is this thread-safe?"
-Visual select → ga → "what happens on nil input?"
+Terminal 1: nvim
+Terminal 2: pi
+/reload
+/cogcog-claim
 ```
 
-### Generate code
+Then in Neovim:
 
 ```text
-gsaf → "add error handling"
-gsip → "implement this TODO"
-gss → "scaffold the module"
+gaip
+<leader>gcaf
+gsip
+<leader>grip
+<C-g>
+<leader>gx
 ```
 
-0.3s. Output in a code buffer with correct filetype. `:w filename` to save.
-
-### Refactor in-place
+## Ask / explain
 
 ```text
-<leader>graf → "simplify"
-<leader>grip → "convert to async/await"
-Visual <leader>gr → "add type annotations"
+gaip             ask about inner paragraph
+gaf              ask about current function
+gaa              ask about whole file
+1gaip            shorter ask wording
+3gaip            more detailed ask wording
+Visual ga        ask a specific question about selection
 ```
 
-Small rewrites apply directly. `u` to undo.
-Larger rewrites open a review buffer with a unified diff. Press `a` to apply or `q` to close.
-
-### Plan / synthesize in the workbench
+Good prompts after visual `ga`:
 
 ```text
-<C-g> → "add rate limiting to the API"
-<C-g> → "use token bucket, not sliding window"
+is this thread-safe?
+what edge cases are missing?
+what is the actual control flow here?
 ```
 
-Fast workbench synthesis. Shows current filename in the prompt when invoked from code.
-
-## Deeper / optional verbs
-
-### Check
+## Generate
 
 ```text
-<leader>gcaf        review this function
-<leader>gcip        review this paragraph
+gsip             generate from scoped text
+gsaf             generate from current function
+gss              generate from whole file
+Visual gs        generate from selection
 ```
 
-Uses the bundled Cogcog transport.
-Set `COGCOG_CHECKER` only if you explicitly want a different command.
-
-### Discover project
+Useful instructions:
 
 ```text
-<leader>cd
+implement this TODO
+add validation and clear errors
+write the happy path first, keep it small
 ```
 
-Discovery writes a project dashboard you can navigate with `gf`.
-
-## Context from vim state
-
-### Your screen is context
-
-`ga` auto-includes code from visible windows. Split `auth.ts` and `middleware.ts` side by side → `gaip` in `auth.ts` sees both files.
-
-### Jump trail
-
-Navigate around with `gd`, `gr`, `<C-o>`:
+## Refactor
 
 ```text
-<leader>gj          how do these locations connect?
+<leader>grip     refactor inner paragraph
+<leader>graf     refactor current function
+Visual <leader>gr
 ```
 
-### Recent changes
-
-Edit some code, then:
+Useful instructions:
 
 ```text
-<leader>g.          any bugs in my changes?
+simplify the control flow
+convert this to async/await
+reduce branching, keep behavior the same
 ```
 
-### Quickfix
+The refactor event includes the exact target file + line range, so pi can edit precisely.
+
+## Check / review
+
+```text
+<leader>gcip     review current paragraph
+<leader>gcaf     review current function
+Visual <leader>gc
+```
+
+Useful review prompts:
+
+```text
+review this for correctness
+look for race conditions
+check null / empty / retry edge cases
+```
+
+## Execute from Neovim
+
+```text
+<leader>gx       prompt in Neovim, then push the instruction to pi
+```
+
+Use this when you want a direct do-work turn from the editor:
+
+```text
+fix this test failure
+rename this module to auth-client
+implement the TODO below
+investigate why this code loops forever
+```
+
+Cogcog records the instruction in the workbench, emits an `execute` event, and
+pi can take it from there.
+
+## Workbench
+
+```text
+<leader>co       open / close workbench
+<leader>gy       pin selection into workbench
+<C-g>            continue from current file / workbench
+<leader>cc       clear workbench
+```
+
+Use the workbench when the task stops being “one scoped question” and starts becoming:
+
+- a plan
+- a comparison between multiple snippets
+- a running scratchpad
+- a place to collect notes for pi
+
+### Example: compare two functions
 
 ```vim
-:make               " errors → quickfix
-gaip                " explain failure (quickfix auto-included)
-
-:lua vim.diagnostic.setqflist()     " LSP diagnostics
-gaip                                " explain
-
-:grep "TODO" src/**
-<leader>gq                          " summarize what is in quickfix
-<leader>gQ                          " review and prioritize quickfix items
+" file A: visual select -> <leader>gy
+" file B: visual select -> <leader>gy
+<C-g>            " ask pi to continue from the workbench thread
 ```
 
-## Scope model
+### Example: stage context manually
 
-Cogcog distinguishes between three kinds of context:
-
-- **hard scope** — the explicit operand or target set
-- **explicit imports** — workbench contents, pinned snippets, command output you added
-- **soft context** — visible windows for grounding
-
-## Workbench flow
-
-```text
-<leader>co                open workbench
-gaip                      explain with the workbench in play
-<C-g>                     continue using the current workbench
-<leader>co                close → back to stateless operator flow
-```
-
-## Pin from multiple files
+Open the workbench and use normal vim commands:
 
 ```vim
-" file A: visual select → <leader>gy
-" file B: visual select → <leader>gy
-<C-g> → "can these race?"
+:read !git diff --staged
+:read !rg -n "RateLimiter" src/
 ```
 
-## Pi integration (separate terminal)
+The workbench is just a buffer.
 
-CogCog + pi = two terminals, one workflow.
+## Use your screen as context
+
+Before each Cogcog-triggered turn, the bundled pi extension injects:
+
+- current buffer
+- cursor position
+- visible windows
+- quickfix entries
+- diagnostics summary
+- nearby lines around the cursor
+
+That means splits are meaningful.
+
+### Example
+
+```vim
+:edit src/auth.ts
+:vsplit src/session.ts
+gaip
+```
+
+pi can see both visible buffers and decide whether to inspect one of them further.
+
+## pi bridge commands
+
+Inside pi:
 
 ```text
-Terminal 1: nvim              fast verbs, editing, visual review
-Terminal 2: pi                agent work, multi-file changes
+/cogcog-claim
+/cogcog-release
+/cogcog-status
 ```
 
-CogCog auto-starts `vim.fn.serverstart("/tmp/cogcog.sock")`.
-Pi connects via the cogcog extension and gets:
+If `gaip` seems to do nothing, `cogcog-status` is the first place to look.
 
-- **Auto-injected context**: every prompt includes your buffer, cursor, visible windows, quickfix, and diagnostics
-- **8 tools**: `nvim_context`, `nvim_buffer`, `nvim_buffers`, `nvim_diagnostics`, `nvim_goto`, `nvim_quickfix`, `nvim_exec`, `nvim_notify`
-- When pi edits files, Neovim autoread picks up changes
+## Neovim tools pi can use
 
-Install:
+```text
+nvim_context
+nvim_buffer
+nvim_buffers
+nvim_diagnostics
+nvim_goto
+nvim_quickfix
+nvim_exec
+nvim_notify
+```
+
+Practical uses:
+
+- `nvim_context` to understand where you are
+- `nvim_buffer` to read a loaded buffer in full
+- `nvim_goto` to jump you to a file/line
+- `nvim_quickfix` to send review findings into quickfix
+- `nvim_notify` to tell you when a task is done
+
+## Internal event hook
+
+Every forwarded action also fires a local Neovim event:
+
+```text
+User CogcogEvent
+vim.g.cogcog_last_event
+```
+
+You probably do not need this day to day, but it is there if you want to build
+a custom listener later.
+
+## Shell mode
+
+Cogcog also ships a plain shell helper:
 
 ```bash
-ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+echo "explain CRDs" | cogcog
+cat src/main.ts | cogcog --raw
+git diff --staged | cogcog "review this"
 ```
 
-Optional `nv` helper for scripts and agent skills:
+Example config:
 
 ```bash
-nv status                   check connection
-nv context                  full editor state
-nv buffer [path]            read buffer content
-nv buffers                  list loaded buffers
-nv diagnostics [path]       LSP diagnostics
-nv goto <path> [line]       open file in Neovim
-nv eval <lua-expr>          arbitrary Lua
+export COGCOG_API_URL=http://localhost:8091/v1/chat/completions
+export COGCOG_MODEL=gemma4:26b
+export OPENAI_API_KEY=dummy
 ```
 
-## Quickfix rewrite flow
-
-Build a deliberate target set first:
-
-```vim
-:grep "TODO" src/**
-<leader>gR
-```
-
-Prepares merged quickfix targets, opens review buffer with diffs.
-Press `a` to apply, `q` to reject.
-
-## Generate → check loop
-
-```text
-gsaf → "implement retry with backoff"      generate (0.3s)
-:w src/retry.ts                             save
-:make                                       test
-gaip                                        explain errors
-gsaf → "fix it"                            iterate
-<leader>gcaf                                verify with check
-```
-
-## Improve prompts over time
-
-```text
-<leader>cp → "it gave generic advice instead of reading the code"
-```
-
-Appends to `.cogcog/system.md`. Prompts improve per-project.
-
-## Context management (native vim)
-
-```vim
-<leader>co                          " open workbench
-:read .cogcog/review.md             " add review skill
-:read !git diff --staged            " add staged changes
-:read !tree -L 3                    " project structure
-dap                                 " delete a section
-```
-
-## Shell
+Optional fast path:
 
 ```bash
-export COGCOG_BACKEND=copilot
-echo "explain CRDs" | cogcog --raw          # fast: sonnet 4.6
-git diff --staged | cogcog "review this"    # smart: opus 4.6
+export COGCOG_FAST_API_URL=http://localhost:1234/v1/chat/completions
+export COGCOG_FAST_MODEL=gemma-4-e4b
+```
+
+Or delegate to another CLI:
+
+```bash
+export COGCOG_CMD='claude -p'
 ```
 
 ## Combos
 
 ```text
-gaip                        instant explain
-gaa                         explain entire file
-gd → gaip                   definition → explain
-:make → gaip                errors → explain
-<leader>gj                  jump trail → how connected
-<leader>g.                  changes → any bugs
-gsip → <leader>gcip         generate → verify
-<C-g>                       plan in workbench
-<leader>cd → gf → gaip      discover → navigate → understand
+gaip                     quick explain / ask
+gaf                      ask about function
+Visual ga                ask a precise question
+
+gsip -> <leader>gcaf     generate, then review
+<leader>grip -> gaip     refactor, then ask what changed
+
+<leader>gy x2 -> <C-g>   pin multiple snippets, then continue in workbench
+<leader>gx               push a do-work instruction from Neovim
+
+/cogcog-status           debug event delivery
 ```
+
+## Mental model
+
+- Use **motions** when scope is obvious
+- Use **visual selections** when you need exactness
+- Use **splits** when you want nearby context visible
+- Use **workbench** when the task becomes iterative
+- Use **pi** for the actual agent turn
+- Use **vim** for review, navigation, and undo

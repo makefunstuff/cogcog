@@ -260,7 +260,8 @@ export default function (pi: ExtensionAPI) {
         lines.push(payload.question || "Continue from the current Cogcog workbench context in Neovim.");
         break;
       case "execute":
-        lines.push(payload.instruction || "Execute the requested work from Cogcog.");
+        if (payload.instruction) lines.push(`Instruction: ${payload.instruction}`);
+        else lines.push("Execute the requested work from Cogcog.");
         break;
       default:
         return null;
