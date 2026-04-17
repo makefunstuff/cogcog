@@ -6,7 +6,7 @@
 Each module handles one responsibility:
 - **init.lua**: Vim keymaps and command verbs
 - **context.lua**: Context gathering and input building
-- **transport.lua**: Emit harness-facing events
+- **transport.lua**: Emit pi-facing RPC events
 - **config.lua**: Configuration and shared state
 
 ### Vim-Native Design
@@ -17,7 +17,7 @@ Each module handles one responsibility:
 ### Async Patterns
 - Prefer event emission over embedded backend loops
 - `vim.schedule()` for deferred UI operations when needed
-- Use Neovim autocmds / serialized event payloads for harness handoff
+- Use Neovim RPC notifications plus autocmds for external handoff
 
 ## Conventions
 

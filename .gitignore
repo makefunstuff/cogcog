@@ -1,11 +1,13 @@
 # cogcog - ignore generated and temporary files
 
 # cogcog state
-.cogcog/events.fifo
 .cogcog/workbench.md
 .cogcog/session.md
 .cogcog/system.md
 .cogcog/discovery.md
+
+# extension deps
+pi-extension/node_modules/
 
 # vim swap files
 *.swp

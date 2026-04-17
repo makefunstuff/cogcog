@@ -1,0 +1,16 @@
+{
+  "name": "cogcog-pi-extension",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "neovim": "^5.4.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.6",
+    "@types/node": "^25.6.0",
+    "typescript": "^5.9.3"
+  }
+}

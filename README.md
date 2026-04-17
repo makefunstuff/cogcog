@@ -65,6 +65,11 @@ Terminal 1: nvim                    editing, fast verbs, visual review
 Terminal 2: pi                      agent loops, multi-file refactors
 ```
 
+The same Neovim RPC socket handles both directions:
+
+- **Pi → Neovim** for editor context and editor actions
+- **Neovim → Pi** for live CogCog verb events (`ask`, `generate`, `refactor`, `plan`, ...)
+
 Pi sees what you see — automatically, every prompt:
 
 ```markdown
@@ -90,11 +95,25 @@ And it can reach back into your editor:
 ### Setup
 
 ```bash
+cd /path/to/cogcog/pi-extension && npm install
 ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 ```
 
+Then `/reload` in pi.
+
+If you run multiple pi instances, explicitly choose the event consumer:
+
+```text
+/cogcog-claim      receive CogCog verb events in this pi session
+/cogcog-release    stop receiving them here
+/cogcog-status     show socket/channel/owner state
+```
+
+Only the claimed pi session receives live CogCog events.
+
 No bridge process. No wrapper scripts. Pi talks directly to Neovim's native
-RPC socket via the `cogcog.bridge` Lua module.
+msgpack-RPC socket via the `cogcog.bridge` Lua module, and CogCog verbs push
+live events back over that same connection.
 
 ## Backend
 
@@ -195,12 +214,12 @@ See [TUTORIAL.md](TUTORIAL.md) · [USAGE.md](USAGE.md) · [CHEATSHEET.md](CHEATS
 ```text
 bin/cogcog                  # stdin → LLM → stdout (OpenAI-compatible)
 lua/cogcog/init.lua         # verbs and keymaps
-lua/cogcog/transport.lua    # emits harness events
+lua/cogcog/transport.lua    # emits live RPC events to pi
 lua/cogcog/context.lua      # scope builders, workbench
 lua/cogcog/config.lua       # paths and config
-lua/cogcog/bridge.lua       # editor state for pi extension
-pi-extension/               # pi extension (TypeScript)
+lua/cogcog/bridge.lua       # Neovim RPC bridge for pi extension
+pi-extension/               # pi extension (TypeScript + Neovim client)
 skills/nvim-bridge/         # agent skill for nv CLI
 doc/cogcog.txt              # :help cogcog
-.cogcog/                    # prompts, templates, event queue
+.cogcog/                    # prompts, templates, workbench state
 ```

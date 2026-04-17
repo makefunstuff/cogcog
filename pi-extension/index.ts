@@ -1,19 +1,25 @@
 // cogcog pi extension — gives pi eyes into your running Neovim.
 // Install: ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
+// Then run `npm install` in this directory once for the Neovim RPC client.
 //
 // Start Neovim with: nvim --listen /tmp/cogcog.sock
 // Or set COGCOG_NVIM_SOCKET to your socket path.
 // Then run pi in another terminal — it auto-detects the connection.
 
-import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { attach, type NeovimClient } from "neovim";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
+type RpcNeovim = NeovimClient & {
+  on(event: "notification", listener: (method: string, args: any[]) => void): RpcNeovim;
+  on(event: "disconnect", listener: () => void): RpcNeovim;
+  removeAllListeners(event?: string): RpcNeovim;
+  transport: { close(): Promise<void> };
+};
+
 export default function (pi: ExtensionAPI) {
-  const socketPath =
-    process.env.COGCOG_NVIM_SOCKET || "/tmp/cogcog.sock";
+  const socketPath = process.env.COGCOG_NVIM_SOCKET || "/tmp/cogcog.sock";
 
   const actionableEventTypes = new Set([
     "ask",
@@ -24,65 +30,186 @@ export default function (pi: ExtensionAPI) {
     "execute",
   ]);
 
-  let fifoStream: fs.ReadStream | null = null;
-  let watchedEventFile: string | null = null;
-  let eventRemainder = "";
-  let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+  const rpcLogger = {
+    level: "silent",
+    info() {},
+    warn() {},
+    error() {},
+    debug() {},
+  };
+
+  let nvim: RpcNeovim | null = null;
+  let connectPromise: Promise<RpcNeovim | null> | null = null;
+  let attachedChannel: number | null = null;
+  let sessionCtx: any = null;
 
   // ── helpers ───────────────────────────────────────────────────
 
-  async function isConnected(): Promise<boolean> {
-    try {
-      const fs = await import("node:fs");
-      if (!fs.existsSync(socketPath)) return false;
-      const r = await pi.exec("nvim", ["--server", socketPath, "--remote-expr", "1"], { timeout: 2000 });
-      return r.code === 0;
-    } catch {
-      return false;
-    }
+  function uiNotify(msg: string, level: "info" | "warning" | "error" = "info") {
+    if (sessionCtx?.hasUI) sessionCtx.ui.notify(msg, level);
   }
 
-  /** Call a cogcog.bridge Lua method via --remote-expr. */
-  async function nvimCall(method: string, args?: Record<string, any>): Promise<any> {
-    let luaExpr: string;
-    if (args) {
-      // use [=[...]=] to avoid ]] issues in JSON, [[...]] for require
-      const json = JSON.stringify(args);
-      luaExpr = `require([[cogcog.bridge]]).${method}([=[${json}]=])`;
+  function setCogcogStatus(text: string) {
+    if (sessionCtx) sessionCtx.ui.setStatus("cogcog", text);
+  }
+
+  function schema<T>(value: T): any {
+    return value;
+  }
+
+  async function currentChannel(): Promise<number | null> {
+    const client = await ensureNvim();
+    if (!client) return null;
+    if (attachedChannel != null) return attachedChannel;
+    attachedChannel = await client.channelId;
+    return attachedChannel;
+  }
+
+  async function bridgeStatus() {
+    const channel = await currentChannel();
+    const owner = (await nvimCall("get_pi_status"))?.owner ?? null;
+    return {
+      channel,
+      owner,
+      claimed: channel != null && owner === channel,
+    };
+  }
+
+  async function refreshStatus() {
+    if (!(await isConnected())) {
+      setCogcogStatus("nvim: disconnected");
+      return;
+    }
+
+    const status = await bridgeStatus();
+    if (status.claimed) {
+      setCogcogStatus(`nvim: connected · claimed (${status.channel})`);
+    } else if (status.owner != null) {
+      setCogcogStatus(`nvim: connected · owner ${status.owner}`);
     } else {
-      luaExpr = `require([[cogcog.bridge]]).${method}()`;
+      setCogcogStatus("nvim: connected · unclaimed");
     }
+  }
 
-    const result = await pi.exec(
-      "nvim",
-      ["--server", socketPath, "--remote-expr", `luaeval('${luaExpr}')`],
-      { timeout: 5000 }
-    );
+  async function claimBridge() {
+    const channel = await currentChannel();
+    if (channel == null) return null;
+    return await nvimCall("claim_pi", { channel });
+  }
 
-    if (result.code !== 0) return null;
-    const out = result.stdout.trim();
-    if (!out) return null;
+  async function releaseBridge() {
+    const channel = await currentChannel();
+    if (channel == null) return null;
+    return await nvimCall("release_pi", { channel });
+  }
+
+  function handleNotification(method: string, args: any[]) {
+    if (method !== "cogcog_notify") return;
     try {
-      return JSON.parse(out);
+      const event = Array.isArray(args) ? args[0] : undefined;
+      const message = formatEventMessage(event);
+      if (!message) return;
+      deliverEventMessage(message);
+    } catch (error) {
+      uiNotify(`cogcog: failed to process event (${String(error)})`, "warning");
+    }
+  }
+
+  async function closeNvim(detachBridge = true) {
+    const client = nvim;
+    const channel = attachedChannel;
+
+    nvim = null;
+    attachedChannel = null;
+    connectPromise = null;
+
+    if (!client) {
+      setCogcogStatus("nvim: disconnected");
+      return;
+    }
+
+    client.removeAllListeners("notification");
+    client.removeAllListeners("disconnect");
+
+    if (detachBridge && channel != null) {
+      try {
+        await client.executeLua('return require("cogcog.bridge").detach_pi(...)', [{ channel }]);
+      } catch {
+        // Best effort only.
+      }
+    }
+
+    try {
+      await client.transport.close();
     } catch {
-      return out;
+      // Ignore already-closed sockets.
+    }
+
+    setCogcogStatus("nvim: disconnected");
+  }
+
+  async function ensureNvim(): Promise<RpcNeovim | null> {
+    if (nvim) return nvim;
+    if (connectPromise) return connectPromise;
+    if (!fs.existsSync(socketPath)) return null;
+
+    const promise = (async () => {
+      const client = attach({ socket: socketPath, options: { logger: rpcLogger as any } }) as RpcNeovim;
+      client.on("notification", handleNotification);
+      client.on("disconnect", () => {
+        if (nvim === client) {
+          nvim = null;
+          attachedChannel = null;
+          connectPromise = null;
+          setCogcogStatus("nvim: disconnected");
+        }
+      });
+
+      try {
+        const channel = await client.channelId;
+        await client.executeLua('return require("cogcog.bridge").attach_pi(...)', [{ channel }]);
+        nvim = client;
+        attachedChannel = channel;
+        await refreshStatus();
+        return client;
+      } catch (error) {
+        client.removeAllListeners();
+        try {
+          await client.transport.close();
+        } catch {
+          // Ignore.
+        }
+        uiNotify(`cogcog: failed to attach to Neovim (${String(error)})`, "error");
+        return null;
+      }
+    })();
+
+    connectPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (connectPromise === promise) connectPromise = null;
     }
   }
 
-  function eventFileForCwd(cwd: string): string {
-    return path.join(cwd, ".cogcog", "events.fifo");
+  async function isConnected(): Promise<boolean> {
+    return (await ensureNvim()) != null;
   }
 
-  function ensureEventFifo(file: string) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+  /** Call a cogcog.bridge Lua method over the persistent Neovim RPC socket. */
+  async function nvimCall(method: string, args?: Record<string, any>): Promise<any> {
+    const client = await ensureNvim();
+    if (!client) return null;
 
-    if (fs.existsSync(file)) {
-      const stat = fs.lstatSync(file);
-      if (stat.isFIFO()) return;
-      fs.rmSync(file, { force: true });
+    try {
+      const lua = args
+        ? `return require("cogcog.bridge").${method}(...)`
+        : `return require("cogcog.bridge").${method}()`;
+      return await client.executeLua(lua, args ? [args] : []);
+    } catch (error) {
+      uiNotify(`cogcog: nvimCall ${method} failed (${String(error)})`, "warning");
+      return null;
     }
-
-    childProcess.execFileSync("mkfifo", [file]);
   }
 
   function formatSnippet(title: string, lines: unknown, maxLines = 40): string[] {
@@ -144,80 +271,30 @@ export default function (pi: ExtensionAPI) {
     return lines.join("\n");
   }
 
-  function stopWatchingEvents() {
-    if (reopenTimer) {
-      clearTimeout(reopenTimer);
-      reopenTimer = null;
-    }
-    if (fifoStream) {
-      fifoStream.removeAllListeners();
-      fifoStream.destroy();
-      fifoStream = null;
-    }
-    watchedEventFile = null;
-    eventRemainder = "";
-  }
-
-  function startWatchingEvents(file: string) {
-    if (watchedEventFile === file && fifoStream) return;
-
-    stopWatchingEvents();
-    ensureEventFifo(file);
-    watchedEventFile = file;
-    eventRemainder = "";
-
-    const openReader = () => {
-      if (watchedEventFile !== file) return;
-
-      const stream = fs.createReadStream(file, {
-        encoding: "utf8",
-        flags: "r",
+  function deliverEventMessage(message: string) {
+    try {
+      const result = pi.sendUserMessage(message);
+      Promise.resolve(result).catch(() => {
+        Promise.resolve(pi.sendUserMessage(message, { deliverAs: "followUp" })).catch(() => {
+          uiNotify("cogcog: failed to queue follow-up event", "error");
+        });
       });
-      fifoStream = stream;
-
-      stream.on("data", (chunk: string) => {
-        const text = eventRemainder + chunk;
-        const lines = text.split(/\r?\n/);
-        eventRemainder = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            const message = formatEventMessage(event);
-            if (!message) continue;
-            pi.sendUserMessage(message, { deliverAs: "followUp" });
-          } catch {
-            // Ignore malformed lines.
-          }
-        }
-      });
-
-      const reopen = () => {
-        if (fifoStream === stream) fifoStream = null;
-        if (watchedEventFile !== file) return;
-        if (reopenTimer) clearTimeout(reopenTimer);
-        reopenTimer = setTimeout(() => {
-          reopenTimer = null;
-          openReader();
-        }, 250);
-      };
-
-      stream.on("error", reopen);
-      stream.on("close", reopen);
-      stream.on("end", reopen);
-    };
-
-    openReader();
+    } catch {
+      try {
+        Promise.resolve(pi.sendUserMessage(message, { deliverAs: "followUp" })).catch(() => {
+          uiNotify("cogcog: failed to queue follow-up event", "error");
+        });
+      } catch {
+        uiNotify("cogcog: failed to send event", "error");
+      }
+    }
   }
 
   // ── context injection ─────────────────────────────────────────
 
   pi.on("before_agent_start", async (_event, _ctx) => {
-    if (!(await isConnected())) return;
     const context = await nvimCall("get_context");
     if (!context) return;
-    if (context.cwd) startWatchingEvents(eventFileForCwd(context.cwd));
 
     const lines: string[] = [];
     lines.push("## Neovim Editor State");
@@ -275,7 +352,7 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Context",
     description:
       "Get the user's current Neovim editor state: active buffer, cursor position, visible windows, quickfix list, diagnostics summary, and lines around the cursor.",
-    parameters: Type.Object({}),
+    parameters: schema(Type.Object({})),
     async execute() {
       const ctx = await nvimCall("get_context");
       if (!ctx) throw new Error(`Neovim not reachable at ${socketPath}`);
@@ -291,12 +368,12 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Diagnostics",
     description:
       "Get LSP diagnostics from the user's Neovim. Shows errors, warnings, and info with file:line locations. Optionally filter by file path.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       path: Type.Optional(
         Type.String({ description: "File path to filter (all buffers if omitted)" })
       ),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       const diags = await nvimCall("get_diagnostics", { path: params.path || "" });
       if (!diags) throw new Error(`Neovim not reachable at ${socketPath}`);
       if (!Array.isArray(diags) || diags.length === 0) {
@@ -317,12 +394,12 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Buffer",
     description:
       "Read the full contents of a buffer currently open in the user's Neovim. Returns text, filetype, and modified status. Reads the current buffer if no path given.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       path: Type.Optional(
         Type.String({ description: "Buffer path (current buffer if omitted)" })
       ),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       const buf = await nvimCall("get_buffer", { path: params.path || "" });
       if (!buf) throw new Error(`Neovim not reachable at ${socketPath}`);
       if (buf.error) throw new Error(buf.error);
@@ -337,7 +414,7 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Buffers",
     description:
       "List all loaded file buffers in the user's Neovim with filetypes, line counts, and modified status.",
-    parameters: Type.Object({}),
+    parameters: schema(Type.Object({})),
     async execute() {
       const buffers = await nvimCall("get_buffers");
       if (!buffers) throw new Error(`Neovim not reachable at ${socketPath}`);
@@ -359,11 +436,11 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Goto",
     description:
       "Open a file at a specific line in the user's Neovim editor. The editor window will jump to the file and line.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       path: Type.String({ description: "File path to open" }),
       line: Type.Optional(Type.Number({ description: "Line number to jump to" })),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       const result = await nvimCall("goto_file", {
         path: params.path,
         line: params.line || 0,
@@ -382,7 +459,7 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Quickfix",
     description:
       "Set the quickfix list in the user's Neovim. Items appear in the quickfix window and can be navigated with :cnext/:cprev or Telescope. Use this to send findings (TODOs, issues, locations) to the editor.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       title: Type.Optional(Type.String({ description: "Quickfix list title" })),
       items: Type.Array(
         Type.Object({
@@ -396,8 +473,8 @@ export default function (pi: ExtensionAPI) {
         }),
         { description: "Quickfix items" }
       ),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       const result = await nvimCall("set_quickfix", {
         title: params.title || "pi",
         items: params.items,
@@ -420,10 +497,10 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Command",
     description:
       "Run a vim command in the user's Neovim (e.g. :make, :write, :grep). Use for triggering builds, saves, or other editor actions.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       cmd: Type.String({ description: "Vim command to execute (without leading :)" }),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       const result = await nvimCall("exec", { cmd: params.cmd });
       if (!result) throw new Error(`Neovim not reachable at ${socketPath}`);
       return {
@@ -438,13 +515,13 @@ export default function (pi: ExtensionAPI) {
     label: "Neovim Notify",
     description:
       "Send a notification to the user's Neovim editor.",
-    parameters: Type.Object({
+    parameters: schema(Type.Object({
       msg: Type.String({ description: "Notification message" }),
       level: Type.Optional(
         Type.String({ description: "Level: error, warn, info (default: info)" })
       ),
-    }),
-    async execute(_id, params) {
+    })),
+    async execute(_id: string, params: any) {
       await nvimCall("notify", { msg: params.msg, level: params.level || "info" });
       return {
         content: [{ type: "text" as const, text: `Notified: ${params.msg}` }],
@@ -453,27 +530,56 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("cogcog-claim", {
+    description: "Claim Cogcog event delivery for this pi session",
+    handler: async (_args, ctx) => {
+      const result = await claimBridge();
+      if (!result) {
+        ctx.ui.notify(`cogcog: Neovim not reachable at ${socketPath}`, "warning");
+        return;
+      }
+      await refreshStatus();
+      ctx.ui.notify(`cogcog: claimed events for channel ${result.owner}`, "info");
+    },
+  });
+
+  pi.registerCommand("cogcog-release", {
+    description: "Release Cogcog event delivery from this pi session",
+    handler: async (_args, ctx) => {
+      const result = await releaseBridge();
+      if (!result) {
+        ctx.ui.notify(`cogcog: Neovim not reachable at ${socketPath}`, "warning");
+        return;
+      }
+      await refreshStatus();
+      ctx.ui.notify(
+        result.released ? "cogcog: released event claim" : `cogcog: another session owns events (${result.owner ?? "-"})`,
+        result.released ? "info" : "warning"
+      );
+    },
+  });
+
+  pi.registerCommand("cogcog-status", {
+    description: "Show Cogcog bridge status",
+    handler: async (_args, ctx) => {
+      const connected = await isConnected();
+      const status = connected ? await bridgeStatus() : { channel: null, owner: null, claimed: false };
+      ctx.ui.notify(
+        `cogcog: nvim=${connected ? "connected" : "disconnected"} socket=${socketPath} channel=${status.channel ?? "-"} owner=${status.owner ?? "-"} claimed=${status.claimed ? "yes" : "no"}`,
+        "info"
+      );
+    },
+  });
+
   // ── status on load ────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    let cwd = process.cwd();
-    if (await isConnected()) {
-      ctx.ui.notify(`cogcog: Neovim connected (${socketPath})`, "info");
-      const nvimCtx = await nvimCall("get_context");
-      if (nvimCtx?.cwd) cwd = nvimCtx.cwd;
-      ctx.ui.setStatus("cogcog", `nvim: connected · events: ${path.join(cwd, ".cogcog")}`);
-    } else {
-      ctx.ui.setStatus("cogcog", "nvim: disconnected");
-    }
-
-    const eventFile = eventFileForCwd(cwd);
-    startWatchingEvents(eventFile);
-    if (ctx.hasUI) {
-      ctx.ui.notify(`cogcog: watching ${eventFile}`, "info");
-    }
+    sessionCtx = ctx;
+    await refreshStatus();
   });
 
   pi.on("session_shutdown", async () => {
-    stopWatchingEvents();
+    await closeNvim();
+    sessionCtx = null;
   });
 }

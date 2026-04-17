@@ -1,10 +1,43 @@
--- cogcog/bridge.lua — Expose Neovim state to external tools (pi extension).
--- Called via: nvim --server /tmp/cogcog.sock --remote-expr "luaeval('...')"
+-- cogcog/bridge.lua — Expose Neovim state to the pi extension over RPC.
 
 local M = {}
 
 local function rel(path)
   return vim.fn.fnamemodify(path, ":.")
+end
+
+local function owner_channel()
+  local channel = vim.g.cogcog_pi_owner_channel
+  if type(channel) == "number" then return channel end
+  if type(channel) == "string" then return tonumber(channel) end
+end
+
+function M.attach_pi(args)
+  args = args or {}
+  return { ok = true, channel = args.channel, owner = owner_channel() }
+end
+
+function M.claim_pi(args)
+  args = args or {}
+  vim.g.cogcog_pi_owner_channel = args.channel
+  return { ok = true, owner = owner_channel(), claimed = true }
+end
+
+function M.release_pi(args)
+  args = args or {}
+  local released = args.channel ~= nil and owner_channel() == args.channel
+  if released then vim.g.cogcog_pi_owner_channel = nil end
+  return { ok = released, owner = owner_channel(), released = released }
+end
+
+function M.detach_pi(args)
+  args = args or {}
+  if owner_channel() == args.channel then vim.g.cogcog_pi_owner_channel = nil end
+  return { ok = true, owner = owner_channel() }
+end
+
+function M.get_pi_status()
+  return { owner = owner_channel() }
 end
 
 --- Current editor state: buffer, cursor, visible windows, quickfix, diagnostics.
@@ -15,13 +48,11 @@ function M.get_context()
   local cursor = vim.api.nvim_win_get_cursor(win)
   local row = cursor[1]
 
-  -- lines around cursor (±10)
   local total = vim.api.nvim_buf_line_count(buf)
   local s = math.max(0, row - 11)
   local e = math.min(total, row + 10)
   local lines = vim.api.nvim_buf_get_lines(buf, s, e, false)
 
-  -- visible windows
   local windows = {}
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     if vim.api.nvim_win_get_config(w).relative == "" then
@@ -38,7 +69,6 @@ function M.get_context()
     end
   end
 
-  -- quickfix
   local qf = {}
   for _, item in ipairs(vim.fn.getqflist()) do
     if item.bufnr > 0 then
@@ -50,12 +80,10 @@ function M.get_context()
     end
   end
 
-  -- diagnostics summary
   local diags = vim.diagnostic.get()
   local counts = { 0, 0, 0, 0 }
   for _, d in ipairs(diags) do counts[d.severity] = (counts[d.severity] or 0) + 1 end
 
-  -- modified buffers
   local modified = {}
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
@@ -64,7 +92,7 @@ function M.get_context()
     end
   end
 
-  return vim.json.encode({
+  return {
     cwd = vim.fn.getcwd(),
     buffer = name ~= "" and name or nil,
     cursor = cursor,
@@ -76,21 +104,24 @@ function M.get_context()
     quickfix = #qf > 0 and qf or nil,
     diagnostics = { errors = counts[1], warnings = counts[2], info = counts[3], hints = counts[4] },
     modified_buffers = #modified > 0 and modified or nil,
-  })
+  }
 end
 
---- LSP diagnostics. Optional JSON arg: {"path":"file.ts"}
-function M.get_diagnostics(args_json)
-  local args = args_json and vim.json.decode(args_json) or {}
+--- LSP diagnostics. Optional args: { path = "file.ts" }
+function M.get_diagnostics(args)
+  args = args or {}
   local bufnr = nil
   if args.path and args.path ~= "" then
     bufnr = vim.fn.bufnr(args.path)
     if bufnr < 0 then
       for _, b in ipairs(vim.api.nvim_list_bufs()) do
-        if rel(vim.api.nvim_buf_get_name(b)) == args.path then bufnr = b; break end
+        if rel(vim.api.nvim_buf_get_name(b)) == args.path then
+          bufnr = b
+          break
+        end
       end
     end
-    if not bufnr or bufnr < 0 then return vim.json.encode({}) end
+    if not bufnr or bufnr < 0 then return {} end
   end
 
   local result = {}
@@ -104,32 +135,35 @@ function M.get_diagnostics(args_json)
       source = d.source,
     })
   end
-  return vim.json.encode(result)
+  return result
 end
 
---- Read buffer content. Optional JSON arg: {"path":"file.ts"}
-function M.get_buffer(args_json)
-  local args = args_json and vim.json.decode(args_json) or {}
+--- Read buffer content. Optional args: { path = "file.ts" }
+function M.get_buffer(args)
+  args = args or {}
   local bufnr
   if args.path and args.path ~= "" then
     bufnr = vim.fn.bufnr(args.path)
     if bufnr < 0 then
       for _, b in ipairs(vim.api.nvim_list_bufs()) do
-        if rel(vim.api.nvim_buf_get_name(b)) == args.path then bufnr = b; break end
+        if rel(vim.api.nvim_buf_get_name(b)) == args.path then
+          bufnr = b
+          break
+        end
       end
     end
-    if not bufnr or bufnr < 0 then return vim.json.encode({ error = "buffer not found: " .. args.path }) end
+    if not bufnr or bufnr < 0 then return { error = "buffer not found: " .. args.path } end
   else
     bufnr = vim.api.nvim_get_current_buf()
   end
 
-  return vim.json.encode({
+  return {
     name = rel(vim.api.nvim_buf_get_name(bufnr)),
     filetype = vim.bo[bufnr].filetype,
     lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false),
     modified = vim.bo[bufnr].modified,
     line_count = vim.api.nvim_buf_line_count(bufnr),
-  })
+  }
 end
 
 --- List all loaded file buffers.
@@ -148,12 +182,12 @@ function M.get_buffers()
       end
     end
   end
-  return vim.json.encode(result)
+  return result
 end
 
---- Open file at line in the user's editor. JSON arg: {"path":"file.ts","line":42}
-function M.goto_file(args_json)
-  local args = vim.json.decode(args_json)
+--- Open file at line in the user's editor. Args: { path = "file.ts", line = 42 }
+function M.goto_file(args)
+  args = args or {}
   vim.schedule(function()
     vim.cmd("edit " .. vim.fn.fnameescape(args.path))
     if args.line and args.line > 0 then
@@ -161,13 +195,12 @@ function M.goto_file(args_json)
       vim.cmd("normal! zz")
     end
   end)
-  return vim.json.encode({ ok = true, path = args.path, line = args.line })
+  return { ok = true, path = args.path, line = args.line }
 end
 
---- Set quickfix list. JSON arg: {"items":[{"filename":"f","lnum":1,"text":"msg"},...], "title":"..."}
---- Items can also have "col" and "type" ("E","W","I","H").
-function M.set_quickfix(args_json)
-  local args = vim.json.decode(args_json)
+--- Set quickfix list. Args: { items = {...}, title = "..." }
+function M.set_quickfix(args)
+  args = args or {}
   local items = args.items or {}
   vim.schedule(function()
     local qf = {}
@@ -186,32 +219,31 @@ function M.set_quickfix(args_json)
     })
     if #qf > 0 then vim.cmd("copen") end
   end)
-  return vim.json.encode({ ok = true, count = #items })
+  return { ok = true, count = #items }
 end
 
---- Run a vim command. JSON arg: {"cmd":"make","silent":true}
-function M.exec(args_json)
-  local args = vim.json.decode(args_json)
-  local output = ""
+--- Run a vim command. Args: { cmd = "make", silent = true }
+function M.exec(args)
+  args = args or {}
   vim.schedule(function()
     local ok, err = pcall(function()
-      output = vim.api.nvim_exec2(args.cmd, { output = true }).output or ""
+      vim.api.nvim_exec2(args.cmd, { output = true })
     end)
     if not ok then
       vim.notify("cogcog bridge exec error: " .. tostring(err), vim.log.levels.ERROR)
     end
   end)
-  return vim.json.encode({ ok = true, cmd = args.cmd })
+  return { ok = true, cmd = args.cmd }
 end
 
---- Send a notification. JSON arg: {"msg":"done","level":"info"}
-function M.notify(args_json)
-  local args = vim.json.decode(args_json)
+--- Send a notification. Args: { msg = "done", level = "info" }
+function M.notify(args)
+  args = args or {}
   local levels = { error = vim.log.levels.ERROR, warn = vim.log.levels.WARN, info = vim.log.levels.INFO }
   vim.schedule(function()
     vim.notify(args.msg or "", levels[args.level] or vim.log.levels.INFO)
   end)
-  return vim.json.encode({ ok = true })
+  return { ok = true }
 end
 
 return M

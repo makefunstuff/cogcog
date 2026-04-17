@@ -278,7 +278,40 @@ end)
 test("transport module loads", function()
   local transport = require("cogcog.transport")
   assert_true(type(transport.emit) == "function", "emit should exist")
-  assert_true(type(transport.event_fifo) == "function", "event_fifo should exist")
+  assert_true(type(transport.target_channel) == "function", "target_channel should exist")
+end)
+
+test("bridge claim/release ownership", function()
+  local bridge = require("cogcog.bridge")
+  vim.g.cogcog_pi_owner_channel = nil
+
+  local attached = bridge.attach_pi({ channel = 11 })
+  assert_equal(attached.owner, nil, "attach should not claim owner")
+
+  local claimed = bridge.claim_pi({ channel = 11 })
+  assert_true(claimed.claimed, "claim should succeed")
+  assert_equal(vim.g.cogcog_pi_owner_channel, 11, "owner should be set")
+
+  local wrong_release = bridge.release_pi({ channel = 12 })
+  assert_true(not wrong_release.released, "wrong channel must not release owner")
+  assert_equal(vim.g.cogcog_pi_owner_channel, 11, "owner should stay set")
+
+  local missing_release = bridge.release_pi({})
+  assert_true(not missing_release.released, "missing channel must not release owner")
+  assert_equal(vim.g.cogcog_pi_owner_channel, 11, "owner should still stay set")
+
+  local detached_other = bridge.detach_pi({ channel = 12 })
+  assert_equal(detached_other.owner, 11, "detaching another channel should keep owner")
+  assert_equal(vim.g.cogcog_pi_owner_channel, 11, "owner should remain after other detach")
+
+  local released = bridge.release_pi({ channel = 11 })
+  assert_true(released.released, "owner should release itself")
+  assert_equal(vim.g.cogcog_pi_owner_channel, nil, "owner should be cleared")
+
+  bridge.claim_pi({ channel = 13 })
+  local detached_owner = bridge.detach_pi({ channel = 13 })
+  assert_equal(detached_owner.owner, nil, "owner detach should clear owner")
+  assert_equal(vim.g.cogcog_pi_owner_channel, nil, "owner should be nil after detach")
 end)
 
 test("with_tools includes builtins", function()
