@@ -5,12 +5,29 @@
 // Or set COGCOG_NVIM_SOCKET to your socket path.
 // Then run pi in another terminal — it auto-detects the connection.
 
+import * as childProcess from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 export default function (pi: ExtensionAPI) {
   const socketPath =
     process.env.COGCOG_NVIM_SOCKET || "/tmp/cogcog.sock";
+
+  const actionableEventTypes = new Set([
+    "ask",
+    "generate",
+    "refactor",
+    "check",
+    "plan",
+    "execute",
+  ]);
+
+  let fifoStream: fs.ReadStream | null = null;
+  let watchedEventFile: string | null = null;
+  let eventRemainder = "";
+  let reopenTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── helpers ───────────────────────────────────────────────────
 
@@ -52,12 +69,155 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function eventFileForCwd(cwd: string): string {
+    return path.join(cwd, ".cogcog", "events.fifo");
+  }
+
+  function ensureEventFifo(file: string) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+
+    if (fs.existsSync(file)) {
+      const stat = fs.lstatSync(file);
+      if (stat.isFIFO()) return;
+      fs.rmSync(file, { force: true });
+    }
+
+    childProcess.execFileSync("mkfifo", [file]);
+  }
+
+  function formatSnippet(title: string, lines: unknown, maxLines = 40): string[] {
+    if (!Array.isArray(lines) || lines.length === 0) return [];
+    const textLines = lines.slice(0, maxLines).map((line) => String(line));
+    const out = ["", `${title}:`, "```"];
+    out.push(...textLines);
+    if (lines.length > maxLines) out.push(`… (${lines.length - maxLines} more lines)`);
+    out.push("```");
+    return out;
+  }
+
+  function formatEventMessage(event: any): string | null {
+    if (!event || !actionableEventTypes.has(event.type)) return null;
+
+    const payload = event.payload || {};
+    const lines: string[] = [];
+    lines.push(`Cogcog event: ${event.type}`);
+    if (event.cwd) lines.push(`CWD: ${event.cwd}`);
+
+    switch (event.type) {
+      case "ask":
+        if (payload.source) lines.push(`Source: ${payload.source}`);
+        if (payload.question) lines.push(`Question: ${payload.question}`);
+        lines.push(...formatSnippet("Selection", payload.selection));
+        break;
+      case "generate":
+        if (payload.source) lines.push(`Source: ${payload.source}`);
+        if (payload.instruction) lines.push(`Instruction: ${payload.instruction}`);
+        lines.push(...formatSnippet("Selection", payload.selection));
+        break;
+      case "refactor":
+        if (payload.source) lines.push(`Source: ${payload.source}`);
+        if (payload.instruction) lines.push(`Instruction: ${payload.instruction}`);
+        if (payload.target?.file) {
+          lines.push(
+            `Target: ${payload.target.file}:${payload.target.start_line}-${payload.target.end_line}`
+          );
+        }
+        lines.push(...formatSnippet("Selection", payload.selection));
+        break;
+      case "check":
+        if (payload.source) lines.push(`Source: ${payload.source}`);
+        lines.push("Review this code for correctness, edge cases, and bugs.");
+        lines.push(...formatSnippet("Selection", payload.selection));
+        break;
+      case "plan":
+        lines.push(payload.question || "Continue from the current Cogcog workbench context in Neovim.");
+        break;
+      case "execute":
+        lines.push(payload.instruction || "Execute the requested work from Cogcog.");
+        break;
+      default:
+        return null;
+    }
+
+    lines.push("");
+    lines.push("Use Neovim tools if you need more editor context.");
+    return lines.join("\n");
+  }
+
+  function stopWatchingEvents() {
+    if (reopenTimer) {
+      clearTimeout(reopenTimer);
+      reopenTimer = null;
+    }
+    if (fifoStream) {
+      fifoStream.removeAllListeners();
+      fifoStream.destroy();
+      fifoStream = null;
+    }
+    watchedEventFile = null;
+    eventRemainder = "";
+  }
+
+  function startWatchingEvents(file: string) {
+    if (watchedEventFile === file && fifoStream) return;
+
+    stopWatchingEvents();
+    ensureEventFifo(file);
+    watchedEventFile = file;
+    eventRemainder = "";
+
+    const openReader = () => {
+      if (watchedEventFile !== file) return;
+
+      const stream = fs.createReadStream(file, {
+        encoding: "utf8",
+        flags: "r",
+      });
+      fifoStream = stream;
+
+      stream.on("data", (chunk: string) => {
+        const text = eventRemainder + chunk;
+        const lines = text.split(/\r?\n/);
+        eventRemainder = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            const message = formatEventMessage(event);
+            if (!message) continue;
+            pi.sendUserMessage(message, { deliverAs: "followUp" });
+          } catch {
+            // Ignore malformed lines.
+          }
+        }
+      });
+
+      const reopen = () => {
+        if (fifoStream === stream) fifoStream = null;
+        if (watchedEventFile !== file) return;
+        if (reopenTimer) clearTimeout(reopenTimer);
+        reopenTimer = setTimeout(() => {
+          reopenTimer = null;
+          openReader();
+        }, 250);
+      };
+
+      stream.on("error", reopen);
+      stream.on("close", reopen);
+      stream.on("end", reopen);
+    };
+
+    openReader();
+  }
+
   // ── context injection ─────────────────────────────────────────
 
   pi.on("before_agent_start", async (_event, _ctx) => {
     if (!(await isConnected())) return;
     const context = await nvimCall("get_context");
     if (!context) return;
+    if (context.cwd) startWatchingEvents(eventFileForCwd(context.cwd));
 
     const lines: string[] = [];
     lines.push("## Neovim Editor State");
@@ -296,10 +456,24 @@ export default function (pi: ExtensionAPI) {
   // ── status on load ────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    let cwd = process.cwd();
     if (await isConnected()) {
       ctx.ui.notify(`cogcog: Neovim connected (${socketPath})`, "info");
+      const nvimCtx = await nvimCall("get_context");
+      if (nvimCtx?.cwd) cwd = nvimCtx.cwd;
+      ctx.ui.setStatus("cogcog", `nvim: connected · events: ${path.join(cwd, ".cogcog")}`);
     } else {
       ctx.ui.setStatus("cogcog", "nvim: disconnected");
     }
+
+    const eventFile = eventFileForCwd(cwd);
+    startWatchingEvents(eventFile);
+    if (ctx.hasUI) {
+      ctx.ui.notify(`cogcog: watching ${eventFile}`, "info");
+    }
+  });
+
+  pi.on("session_shutdown", async () => {
+    stopWatchingEvents();
   });
 }

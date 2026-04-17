@@ -24,6 +24,7 @@ M.workbench_file = M.cogcog_dir .. "/workbench.md"
 M.legacy_session_file = M.cogcog_dir .. "/session.md"
 M.session_file = M.workbench_file -- backward-compatible alias
 M.discovery_file = M.cogcog_dir .. "/discovery.md"
+M.event_fifo = M.cogcog_dir .. "/events.fifo"
 M.cogcog_bin = bundled_cogcog_bin() or (vim.fn.exepath("cogcog") ~= "" and vim.fn.exepath("cogcog")) or "cogcog"
 
 function M.readable_workbench_file()

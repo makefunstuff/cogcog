@@ -1,7 +1,7 @@
 # cogcog - ignore generated and temporary files
 
 # cogcog state
-.cogcog/events.jsonl
+.cogcog/events.fifo
 .cogcog/workbench.md
 .cogcog/session.md
 .cogcog/system.md

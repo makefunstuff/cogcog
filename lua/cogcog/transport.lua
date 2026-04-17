@@ -4,29 +4,50 @@ local M = {}
 
 math.randomseed(vim.uv.hrtime())
 
-local MAX_EVENT_FILE_BYTES = 1024 * 1024
-local KEEP_ROTATED_LINES = 100
+local WRITE_FIFO_PY = [[
+import errno
+import os
+import sys
+
+path = sys.argv[1]
+data = sys.stdin.buffer.read()
+
+try:
+    fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+except OSError as exc:
+    if exc.errno in (errno.ENXIO, errno.ENOENT):
+        sys.exit(3)
+    raise
+
+try:
+    os.write(fd, data)
+finally:
+    os.close(fd)
+]]
 
 local function json_encode(value)
   if vim.json and vim.json.encode then return vim.json.encode(value) end
   return vim.fn.json_encode(value)
 end
 
-local function event_file()
-  return config.cogcog_dir .. "/events.jsonl"
+local function event_fifo()
+  return config.event_fifo
 end
 
-local function rotate_if_needed(path)
-  local size = vim.fn.getfsize(path)
-  if size < 0 or size <= MAX_EVENT_FILE_BYTES then return end
+local function ensure_fifo(path)
+  vim.fn.mkdir(config.cogcog_dir, "p")
+  vim.fn.system({
+    "bash",
+    "-lc",
+    'if [ -e "$1" ] && [ ! -p "$1" ]; then rm -f "$1"; fi; [ -p "$1" ] || mkfifo "$1"',
+    "_",
+    path,
+  })
+end
 
-  local lines = vim.fn.readfile(path)
-  local keep_from = math.max(1, #lines - KEEP_ROTATED_LINES + 1)
-  local kept = {}
-  for i = keep_from, #lines do
-    table.insert(kept, lines[i])
-  end
-  vim.fn.writefile(kept, path)
+local function send_to_fifo(path, data)
+  if vim.fn.executable("python3") ~= 1 then return end
+  vim.fn.system({ "python3", "-c", WRITE_FIFO_PY, path }, data)
 end
 
 local function event_id()
@@ -34,7 +55,8 @@ local function event_id()
 end
 
 function M.emit(kind, payload)
-  vim.fn.mkdir(config.cogcog_dir, "p")
+  local path = event_fifo()
+  ensure_fifo(path)
 
   local event = {
     id = event_id(),
@@ -44,9 +66,7 @@ function M.emit(kind, payload)
     payload = payload or {},
   }
 
-  local path = event_file()
-  rotate_if_needed(path)
-  vim.fn.writefile({ json_encode(event) }, path, "a")
+  send_to_fifo(path, json_encode(event) .. "\n")
 
   vim.g.cogcog_last_event = event
 
@@ -60,8 +80,8 @@ function M.emit(kind, payload)
   return event
 end
 
-function M.event_file()
-  return event_file()
+function M.event_fifo()
+  return event_fifo()
 end
 
 return M

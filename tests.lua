@@ -278,7 +278,7 @@ end)
 test("transport module loads", function()
   local transport = require("cogcog.transport")
   assert_true(type(transport.emit) == "function", "emit should exist")
-  assert_true(type(transport.event_file) == "function", "event_file should exist")
+  assert_true(type(transport.event_fifo) == "function", "event_fifo should exist")
 end)
 
 test("with_tools includes builtins", function()
