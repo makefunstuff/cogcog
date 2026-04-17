@@ -6,7 +6,7 @@
 Each module handles one responsibility:
 - **init.lua**: Vim keymaps and command verbs
 - **context.lua**: Context gathering and input building
-- **stream.lua**: Streaming output to buffers
+- **transport.lua**: Emit harness-facing events
 - **config.lua**: Configuration and shared state
 
 ### Vim-Native Design
@@ -15,9 +15,9 @@ Each module handles one responsibility:
 - No external dependencies beyond neovim
 
 ### Async Patterns
-- Background jobs for LLM communication
-- `vim.schedule()` for cross-thread operations
-- `vim.fn.jobstart()` for asynchronous processing
+- Prefer event emission over embedded backend loops
+- `vim.schedule()` for deferred UI operations when needed
+- Use Neovim autocmds / serialized event payloads for harness handoff
 
 ## Conventions
 

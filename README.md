@@ -192,14 +192,15 @@ See [TUTORIAL.md](TUTORIAL.md) · [USAGE.md](USAGE.md) · [CHEATSHEET.md](CHEATS
 
 ## Structure
 
-```
-bin/cogcog               stdin → LLM → stdout (OpenAI-compatible)
-lua/cogcog/init.lua      verbs, keymaps, tools
-lua/cogcog/stream.lua    streaming to buffers
-lua/cogcog/context.lua   scope builders, workbench
-lua/cogcog/config.lua    paths and config
-lua/cogcog/bridge.lua    editor state for pi extension
-pi-extension/            pi extension (TypeScript)
-skills/nvim-bridge/      agent skill for nv CLI
-doc/cogcog.txt           :help cogcog
+```text
+bin/cogcog                  # stdin → LLM → stdout (OpenAI-compatible)
+lua/cogcog/init.lua         # verbs and keymaps
+lua/cogcog/transport.lua    # emits harness events
+lua/cogcog/context.lua      # scope builders, workbench
+lua/cogcog/config.lua       # paths and config
+lua/cogcog/bridge.lua       # editor state for pi extension
+pi-extension/               # pi extension (TypeScript)
+skills/nvim-bridge/         # agent skill for nv CLI
+doc/cogcog.txt              # :help cogcog
+.cogcog/                    # prompts, templates, event queue
 ```
