@@ -1,5 +1,5 @@
 #!/usr/bin/env lua
--- cogcog/tests.lua — Unit tests for context builders and stream logic
+-- cogcog/tests.lua — Unit tests for context builders and transport logic
 -- Run in Neovim: :luafile tests.lua
 
 -- Minimal test framework
@@ -275,11 +275,10 @@ test("config module loads", function()
 end)
 
 -- Test error handling patterns
-test("error notification uses correct level", function()
-  -- Check that vim.notify is used with ERROR level
-  local stream = require("cogcog.stream")
-  -- Verify error handling exists in the module
-  assert_true(type(stream.cancel_all) == "function", "cancel_all should exist")
+test("transport module loads", function()
+  local transport = require("cogcog.transport")
+  assert_true(type(transport.emit) == "function", "emit should exist")
+  assert_true(type(transport.event_file) == "function", "event_file should exist")
 end)
 
 test("with_tools includes builtins", function()

@@ -1,7 +1,7 @@
 -- cogcog — LLM as a vim verb
 local config = require("cogcog.config")
 local ctx = require("cogcog.context")
-local stream = require("cogcog.stream")
+local transport = require("cogcog.transport")
 
 -- Auto-start Neovim server for pi extension integration.
 -- pi extension connects via this socket to read editor state.
@@ -17,6 +17,13 @@ local ask_verbosity = {
   [3] = "Explain in detail with examples.",
 }
 
+local function emit_context_event(kind, input, extra)
+  local payload = vim.tbl_extend("force", {
+    context = input,
+  }, extra or {})
+  return transport.emit(kind, payload)
+end
+
 local function ask_stateless(code_lines, source, question)
   local input = {}
   ctx.with_system(input)
@@ -29,8 +36,12 @@ local function ask_stateless(code_lines, source, question)
   ctx.with_visible(input)
   table.insert(input, question)
 
-  local buf = ctx.reuse_or_split("[cogcog-ask]", " 🔍 ask │ " .. question:sub(1, 40))
-  stream.to_buf(input, buf, { raw = true })
+  emit_context_event("ask", input, {
+    mode = "stateless",
+    source = source,
+    question = question,
+    selection = code_lines,
+  })
 end
 
 local function ask_in_workbench(code_lines, source, question)
@@ -48,13 +59,11 @@ local function ask_in_workbench(code_lines, source, question)
   ctx.with_workbench(input)
   ctx.with_visible(input)
 
-  stream.to_buf(input, workbench, {
-    raw = true,
-    on_done = function()
-      if vim.api.nvim_buf_is_valid(workbench) then
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
-      end
-    end,
+  emit_context_event("ask", input, {
+    mode = "workbench",
+    source = source,
+    question = question,
+    selection = code_lines,
   })
 end
 
@@ -79,7 +88,7 @@ local function ask_prompted(lines, source)
   end)
 end
 
--- generate (gs): agent backend, new code buffer
+-- generate (gs): emit a bounded generation request
 
 local function gen_send(code_lines, source, instruction)
   local input = {}
@@ -91,35 +100,10 @@ local function gen_send(code_lines, source, instruction)
   table.insert(input, "")
   table.insert(input, "Output only the code. No explanations unless asked.")
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].filetype = "markdown"
-  local win = ctx.make_split(false, buf, " 🔨 gen │ " .. instruction:sub(1, 40))
-  vim.api.nvim_set_option_value("number", true, { win = win })
-
-  stream.to_buf(input, buf, {
-    raw = true, -- fast: code already selected, no tools needed
-    on_done = function()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-      -- strip leading/trailing blanks
-      while #lines > 0 and vim.trim(lines[1]) == "" do table.remove(lines, 1) end
-      while #lines > 0 and vim.trim(lines[#lines]) == "" do table.remove(lines) end
-      -- detect and strip code fences
-      if #lines >= 2 then
-        local lang = lines[1]:match("^```(%w+)")
-        if lang and lines[#lines]:match("^```%s*$") then
-          table.remove(lines, 1)
-          table.remove(lines)
-          vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-          local ft_map = { js="javascript", ts="typescript", py="python", rb="ruby", rs="rust", sh="bash", yml="yaml" }
-          vim.bo[buf].filetype = ft_map[lang] or lang
-        end
-      end
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_option_value("statusline", " 🔨 gen │ done │ :w to save", { win = win })
-      end
-    end,
+  emit_context_event("generate", input, {
+    source = source,
+    instruction = instruction,
+    selection = code_lines,
   })
 end
 
@@ -129,61 +113,7 @@ local function gen(lines, source)
   end)
 end
 
--- refactor (gr): in-place replacement
-
-local REFACTOR_REVIEW_LINE_THRESHOLD = 8
-
-local function apply_refactor_result(target_buf, l1, l2, result)
-  if not vim.api.nvim_buf_is_valid(target_buf) then
-    vim.notify("cogcog: target buffer closed", vim.log.levels.WARN)
-    return false
-  end
-  vim.api.nvim_buf_set_lines(target_buf, l1 - 1, l2, false, result)
-  vim.notify("✓ refactored " .. (l2 - l1 + 1) .. " → " .. #result .. " lines (u to undo)")
-  return true
-end
-
-local function refactor_needs_review(original, result)
-  return math.max(#original, #result) > REFACTOR_REVIEW_LINE_THRESHOLD or math.abs(#original - #result) > 2
-end
-
-local function open_refactor_review(source, instruction, target_buf, l1, l2, original, result)
-  local review_buf, review_win = ctx.reuse_or_split("[cogcog-review]", " 👀 review │ a apply │ q close")
-  local lines = {
-    "# Refactor review",
-    "",
-    "Source: " .. source,
-    "Instruction: " .. instruction,
-    "",
-    "Press `a` to apply, `q` to close.",
-    "",
-    "## Diff",
-    "",
-  }
-  vim.list_extend(lines, ctx.unified_diff(original, result))
-  table.insert(lines, "")
-  table.insert(lines, "## Rewritten")
-  table.insert(lines, "")
-  vim.list_extend(lines, result)
-
-  vim.bo[review_buf].readonly = false
-  vim.bo[review_buf].modifiable = true
-  vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, lines)
-
-  vim.keymap.set("n", "a", function()
-    if apply_refactor_result(target_buf, l1, l2, result) then
-      for _, win in ipairs(vim.fn.win_findbuf(review_buf)) do
-        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, false) end
-      end
-    end
-  end, { buffer = review_buf, desc = "cogcog: apply review" })
-
-  if vim.api.nvim_win_is_valid(review_win) then
-    vim.api.nvim_set_option_value("wrap", false, { win = review_win })
-    vim.api.nvim_set_option_value("statusline", " 👀 review │ a apply │ q close", { win = review_win })
-    vim.api.nvim_set_current_win(review_win)
-  end
-end
+-- refactor (gr): emit a bounded rewrite request for the attached harness
 
 local function refactor_do(lines, source, instruction, l1, l2, target_buf)
   local input = {}
@@ -196,40 +126,15 @@ local function refactor_do(lines, source, instruction, l1, l2, target_buf)
   table.insert(input, "Output ONLY the rewritten content. No explanations, no markdown fences.")
   table.insert(input, "Do NOT refuse. Just rewrite it.")
 
-  -- use a hidden scratch buffer to collect the response, then apply or review
-  local tmp_buf = vim.api.nvim_create_buf(false, true)
-  vim.notify("🔄 refactoring...", vim.log.levels.INFO)
-
-  stream.to_buf(input, tmp_buf, {
-    raw = true,
-    on_done = function()
-      if not vim.api.nvim_buf_is_valid(tmp_buf) then return end
-      local result = vim.api.nvim_buf_get_lines(tmp_buf, 0, -1, false)
-      vim.api.nvim_buf_delete(tmp_buf, { force = true })
-
-      result = ctx.strip_code_fences(result)
-      while #result > 0 and vim.trim(result[1]) == "" do table.remove(result, 1) end
-      while #result > 0 and vim.trim(result[#result]) == "" do table.remove(result) end
-
-      if #result == 0 then
-        vim.notify("cogcog: empty result", vim.log.levels.WARN)
-        return
-      end
-      local text = table.concat(result, " ")
-      if #result <= 2 and (text:match("I do not") or text:match("I cannot") or text:match("I can't")) then
-        vim.notify("cogcog: model refused, original preserved", vim.log.levels.WARN)
-        return
-      end
-      if ctx.same_lines(lines, result) then
-        vim.notify("cogcog: no changes suggested", vim.log.levels.INFO)
-        return
-      end
-      if refactor_needs_review(lines, result) then
-        open_refactor_review(source, instruction, target_buf, l1, l2, lines, result)
-      else
-        apply_refactor_result(target_buf, l1, l2, result)
-      end
-    end,
+  emit_context_event("refactor", input, {
+    source = source,
+    instruction = instruction,
+    selection = lines,
+    target = {
+      file = ctx.relative_name(vim.api.nvim_buf_get_name(target_buf)),
+      start_line = l1,
+      end_line = l2,
+    },
   })
 end
 
@@ -247,7 +152,7 @@ local function refactor(lines, source)
   end)
 end
 
--- check (gc): deep review
+-- check (gc): emit a deeper review request
 
 local function check_send(code_lines, source)
   local input = {}
@@ -257,19 +162,13 @@ local function check_send(code_lines, source)
   table.insert(input, "Be concise. Only flag real problems.")
   table.insert(input, "")
   ctx.with_selection(input, code_lines, source)
-  local title = " 🛡 check │ " .. source:sub(1, 30)
-  local buf, win = ctx.reuse_or_split("[cogcog-check]", title)
-  stream.to_buf(input, buf, {
-    cmd = config.checker_cmd(),
-    on_done = function()
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_option_value("statusline", title .. " │ done", { win = win })
-      end
-    end,
+  emit_context_event("check", input, {
+    source = source,
+    selection = code_lines,
   })
 end
 
--- plan (C-g): workbench-driven synthesis
+-- plan (C-g): workbench-driven harness request
 
 local tool_mode = vim.g.cogcog_tool_mode or "ask"  -- "ask" | "read" | "trust"
 
@@ -427,6 +326,7 @@ local function build_plan_message()
 end
 
 local function plan_send(question)
+  local from_workbench = ctx.is_workbench()
   local workbench = ctx.get_or_create_workbench()
   if question then
     plan_turns = 0
@@ -442,47 +342,31 @@ local function plan_send(question)
   ctx.with_workbench(input)
   ctx.with_visible(input)
 
-  stream.to_buf(input, workbench, {
-    raw = true,
-    on_done = function()
-      if not vim.api.nvim_buf_is_valid(workbench) then return end
-      local all = vim.api.nvim_buf_get_lines(workbench, 0, -1, false)
-      local name, args, line_idx = parse_tool_call(all)
-      if not name then
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "---", "", "" })
-        return
-      end
-      vim.api.nvim_buf_set_lines(workbench, line_idx - 1, line_idx, false, { "🔧 " .. name .. "(" .. args .. ")" })
-      plan_turns = (plan_turns or 0) + 1
-      if plan_turns > 5 then
-        plan_turns = 0
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool limit reached (5 turns) ---", "", "---", "", "" })
-        vim.notify("cogcog: tool turn limit reached", vim.log.levels.WARN)
-        return
-      end
-      local mode = vim.g.cogcog_tool_mode or "ask"
-      local auto = (mode == "trust") or (mode == "read" and is_read_only_tool(name))
-      local function run_tool()
-        local result = execute_tool(name, args)
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " ---", "" })
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, vim.split(result, "\n"))
-        vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- end ---", "" })
-        stream._scroll_buf(workbench)
-        plan_send(nil)
-      end
-      if auto then
-        run_tool()
-      else
-        vim.ui.select({ "y — execute", "n — skip" }, { prompt = "🔧 " .. name .. "(" .. args .. ")" }, function(choice)
-          if not vim.api.nvim_buf_is_valid(workbench) then return end
-          if choice and choice:match("^y") then run_tool() else
-            plan_turns = 0
-            vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- tool: " .. name .. " (skipped) ---", "", "---", "", "" })
-            stream._scroll_buf(workbench)
-          end
-        end)
-      end
-    end,
+  emit_context_event("plan", input, {
+    question = question,
+    mode = from_workbench and "workbench" or "code",
+  })
+end
+
+-- exec (gx): emit an execution request anchored by workbench + visible state
+
+local function exec_send(instruction)
+  local workbench = ctx.get_or_create_workbench()
+
+  vim.api.nvim_buf_set_lines(workbench, -1, -1, false, { "", "--- exec: " .. instruction:sub(1, 50) .. " ---", "" })
+
+  local input = {}
+  ctx.with_agent_instructions(input, "exec")
+  ctx.with_scope_contract(input)
+  ctx.with_quickfix(input)
+  ctx.with_workbench(input)
+  ctx.with_visible(input)
+
+  ctx.show_workbench()
+
+  emit_context_event("execute", input, {
+    instruction = instruction,
+    mode = "workbench",
   })
 end
 
@@ -838,26 +722,11 @@ local function do_discover(discovery_file, update)
     table.insert(input, "- This is a dense working dashboard, not documentation")
   end
   table.insert(input, "Output ONLY the dashboard. No preamble, no commentary, no tool calls.")
-  vim.fn.writefile({ "# Discovering project..." }, discovery_file)
-  vim.cmd("edit " .. vim.fn.fnameescape(discovery_file))
-  local buf = vim.api.nvim_get_current_buf()
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_set_option_value("statusline", " 🗺 discover │ analyzing...", { win = win })
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
 
-  vim.schedule(function()
-    stream.to_buf(input, buf, {
-      cmd = config.checker_cmd(),
-      on_done = function()
-        if not vim.api.nvim_buf_is_valid(buf) then return end
-        vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), discovery_file)
-        vim.cmd("edit!")
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_set_option_value("statusline", " 🗺 discover │ done │ gf to navigate", { win = win })
-        end
-      end,
-    })
-  end)
+  emit_context_event("discover", input, {
+    discovery_file = discovery_file,
+    update = update,
+  })
 end
 
 -- improve prompt
@@ -878,21 +747,10 @@ local function improve_prompt()
       "", "Feedback:", feedback,
       "", "Write ONE instruction to add to the system prompt. Output ONLY the instruction.",
     }
-    local tmp_buf = vim.api.nvim_create_buf(false, true)
-    stream.to_buf(input, tmp_buf, {
-      raw = true,
-      on_done = function()
-        if not vim.api.nvim_buf_is_valid(tmp_buf) then return end
-        local result = vim.api.nvim_buf_get_lines(tmp_buf, 0, -1, false)
-        vim.api.nvim_buf_delete(tmp_buf, { force = true })
-        local improvement = vim.trim(table.concat(result, "\n"))
-        if improvement == "" then return end
-        vim.fn.mkdir(config.cogcog_dir, "p")
-        local existing = vim.fn.filereadable(sys_file) == 1 and vim.fn.readfile(sys_file) or {}
-        table.insert(existing, improvement)
-        vim.fn.writefile(existing, sys_file)
-        vim.notify("cogcog: +" .. improvement:sub(1, 60), vim.log.levels.INFO)
-      end,
+    emit_context_event("improve_prompt", input, {
+      sys_file = sys_file,
+      feedback = feedback,
+      bad_response = buf_lines,
     })
   end)
 end
@@ -1223,8 +1081,7 @@ vim.keymap.set("n", "<leader>gj", function()
   ctx.with_system(input)
   ctx.with_jumps(input, 8)
   table.insert(input, "How do these code locations connect? What's the flow?")
-  local buf = ctx.reuse_or_split("[cogcog-ask]", " 🔗 jumps │ investigation trail")
-  stream.to_buf(input, buf, { raw = true })
+  emit_context_event("jump_trail", input)
 end, { desc = "cogcog: jump trail" })
 
 vim.keymap.set("n", "<leader>g.", function()
@@ -1232,11 +1089,10 @@ vim.keymap.set("n", "<leader>g.", function()
   ctx.with_system(input)
   ctx.with_changes(input)
   table.insert(input, "I made these changes. Any bugs or issues?")
-  local buf = ctx.reuse_or_split("[cogcog-ask]", " 📝 changes │ review edits")
-  stream.to_buf(input, buf, { raw = true })
+  emit_context_event("recent_changes", input)
 end, { desc = "cogcog: review changes" })
 
-local function quickfix_flow(prompt, title)
+local function quickfix_flow(kind, prompt, title)
   local qf = vim.fn.getqflist()
   if #qf == 0 then
     vim.notify("cogcog: quickfix is empty", vim.log.levels.WARN)
@@ -1248,137 +1104,11 @@ local function quickfix_flow(prompt, title)
   ctx.with_quickfix(input)
   ctx.with_visible(input)
   table.insert(input, prompt)
-  local buf = ctx.reuse_or_split("[cogcog-quickfix]", title)
-  stream.to_buf(input, buf, { raw = true })
+  emit_context_event(kind, input, { title = title })
 end
 
 local function quickfix_target_label(target)
   return target.file .. ":" .. target.start .. "-" .. target.stop
-end
-
-local function append_report(buf, lines)
-  if vim.api.nvim_buf_is_valid(buf) then
-    vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
-  end
-end
-
-local function build_quickfix_rewrite_input(target, instruction)
-  local snippet = vim.api.nvim_buf_get_lines(target.bufnr, target.start - 1, target.stop, false)
-  local input = {}
-  ctx.with_system(input)
-  ctx.with_scope_contract(input)
-  ctx.with_workbench(input)
-  table.insert(input, "This is one explicit snippet from the active quickfix target set.")
-  table.insert(input, "Only rewrite the snippet below for this target.")
-  table.insert(input, "")
-  if target.hints and #target.hints > 0 then
-    table.insert(input, "--- quickfix hints ---")
-    for _, hint in ipairs(target.hints) do
-      table.insert(input, target.file .. ":" .. hint.lnum .. ": " .. hint.text)
-    end
-    table.insert(input, "")
-  end
-  ctx.with_selection(input, snippet, quickfix_target_label(target))
-  table.insert(input, instruction)
-  table.insert(input, "")
-  table.insert(input, "Rewrite ONLY the snippet above for this quickfix target.")
-  table.insert(input, "Output ONLY the rewritten content. No explanations, no markdown fences.")
-  return input, snippet
-end
-
-local function normalize_rewrite_result(result)
-  result = ctx.strip_code_fences(result)
-  while #result > 0 and vim.trim(result[1]) == "" do table.remove(result, 1) end
-  while #result > 0 and vim.trim(result[#result]) == "" do table.remove(result) end
-  if #result == 0 then return nil, "empty result" end
-
-  local text = table.concat(result, " ")
-  if #result <= 2 and (text:match("I do not") or text:match("I cannot") or text:match("I can't")) then
-    return nil, "model refused"
-  end
-  return result
-end
-
-local function render_quickfix_rewrite_review(review_buf, instruction, changes, skipped, failures)
-  local lines = {
-    "# Quickfix rewrite review",
-    "",
-    "Instruction: " .. instruction,
-    "Ready changes: " .. tostring(#changes),
-    "Skipped: " .. tostring(skipped),
-    "Failed: " .. tostring(#failures),
-    "",
-  }
-
-  if #changes > 0 then
-    table.insert(lines, "Press `a` to apply all prepared rewrites, `q` to close.")
-  else
-    table.insert(lines, "Nothing to apply. Press `q` to close.")
-  end
-  table.insert(lines, "")
-
-  if #failures > 0 then
-    table.insert(lines, "## Failures")
-    table.insert(lines, "")
-    vim.list_extend(lines, failures)
-    table.insert(lines, "")
-  end
-
-  for _, change in ipairs(changes) do
-    table.insert(lines, "## " .. quickfix_target_label(change.target))
-    table.insert(lines, "")
-    if change.target.hints and #change.target.hints > 0 then
-      table.insert(lines, "Hints:")
-      for _, hint in ipairs(change.target.hints) do
-        table.insert(lines, "- " .. change.target.file .. ":" .. hint.lnum .. ": " .. hint.text)
-      end
-      table.insert(lines, "")
-    end
-    vim.list_extend(lines, ctx.unified_diff(change.original, change.result))
-    table.insert(lines, "")
-  end
-
-  vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, lines)
-end
-
-local function apply_quickfix_rewrite_changes(changes, review_buf, review_win)
-  local applied, failed = 0, 0
-  local failures = {}
-
-  for _, change in ipairs(changes) do
-    local target = change.target
-    if not vim.api.nvim_buf_is_valid(target.bufnr) then
-      failed = failed + 1
-      table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: buffer is no longer valid")
-    else
-      local current = vim.api.nvim_buf_get_lines(target.bufnr, target.start - 1, target.stop, false)
-      if not ctx.same_lines(current, change.original) then
-        failed = failed + 1
-        table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: target changed since review")
-      else
-        vim.api.nvim_buf_set_lines(target.bufnr, target.start - 1, target.stop, false, change.result)
-        applied = applied + 1
-      end
-    end
-  end
-
-  append_report(review_buf, {
-    "## Apply result",
-    "",
-    "Applied: " .. applied,
-    "Failed: " .. failed,
-    "",
-  })
-  if #failures > 0 then
-    append_report(review_buf, failures)
-    append_report(review_buf, { "" })
-  end
-
-  pcall(vim.keymap.del, "n", "a", { buffer = review_buf })
-  if vim.api.nvim_win_is_valid(review_win) then
-    vim.api.nvim_set_option_value("statusline", " ✍ quickfix review │ applied │ q close", { win = review_win })
-  end
-  vim.notify("cogcog: quickfix rewrite applied (" .. applied .. " applied, " .. failed .. " failed)")
 end
 
 local function quickfix_rewrite(instruction)
@@ -1388,112 +1118,33 @@ local function quickfix_rewrite(instruction)
     return
   end
 
-  local review_buf, review_win = ctx.reuse_or_split("[cogcog-quickfix-review]", " 👀 quickfix │ preparing review")
-  vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, {
-    "# Quickfix rewrite review",
-    "",
-    "Instruction: " .. instruction,
-    "Targets: " .. tostring(#targets),
-    "",
-    "Preparing review...",
+  local input = {}
+  ctx.with_system(input)
+  ctx.with_scope_contract(input)
+  ctx.with_workbench(input)
+
+  local payload_targets = {}
+  for _, target in ipairs(targets) do
+    if vim.api.nvim_buf_is_valid(target.bufnr) then
+      table.insert(payload_targets, {
+        file = target.file,
+        start = target.start,
+        stop = target.stop,
+        hints = target.hints,
+        snippet = vim.api.nvim_buf_get_lines(target.bufnr, target.start - 1, target.stop, false),
+      })
+    end
+  end
+
+  emit_context_event("quickfix_rewrite", input, {
+    instruction = instruction,
+    targets = payload_targets,
   })
-  if vim.api.nvim_win_is_valid(review_win) then
-    vim.api.nvim_set_option_value("wrap", false, { win = review_win })
-    vim.api.nvim_set_option_value("statusline", " 👀 quickfix │ preparing review", { win = review_win })
-    vim.api.nvim_set_current_win(review_win)
-  end
-
-  local changes, failures = {}, {}
-  local skipped = 0
-
-  local function finish()
-    render_quickfix_rewrite_review(review_buf, instruction, changes, skipped, failures)
-    if #changes > 0 then
-      vim.keymap.set("n", "a", function()
-        apply_quickfix_rewrite_changes(changes, review_buf, review_win)
-      end, { buffer = review_buf, desc = "cogcog: apply quickfix review" })
-      if vim.api.nvim_win_is_valid(review_win) then
-        vim.api.nvim_set_option_value("statusline", " 👀 quickfix review │ a apply │ q close", { win = review_win })
-      end
-    else
-      pcall(vim.keymap.del, "n", "a", { buffer = review_buf })
-      if vim.api.nvim_win_is_valid(review_win) then
-        vim.api.nvim_set_option_value("statusline", " 👀 quickfix review │ q close", { win = review_win })
-      end
-    end
-    vim.notify("cogcog: quickfix review ready (" .. #changes .. " changes, " .. skipped .. " skipped, " .. #failures .. " failed)")
-  end
-
-  local function process(index)
-    if index > #targets then
-      finish()
-      return
-    end
-
-    local target = targets[index]
-    if not vim.api.nvim_buf_is_valid(target.bufnr) then
-      table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: buffer is no longer valid")
-      append_report(review_buf, { "- " .. quickfix_target_label(target) .. " failed: buffer is no longer valid", "" })
-      process(index + 1)
-      return
-    end
-
-    local input, original = build_quickfix_rewrite_input(target, instruction)
-    local tmp_buf = vim.api.nvim_create_buf(false, true)
-    append_report(review_buf, { "- preparing " .. quickfix_target_label(target) })
-
-    stream.to_buf(input, tmp_buf, {
-      raw = true,
-      on_done = function()
-        if not vim.api.nvim_buf_is_valid(tmp_buf) then
-          table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: temporary result buffer vanished")
-          append_report(review_buf, { "  failed: temporary result buffer vanished", "" })
-          process(index + 1)
-          return
-        end
-
-        local result = vim.api.nvim_buf_get_lines(tmp_buf, 0, -1, false)
-        vim.api.nvim_buf_delete(tmp_buf, { force = true })
-        local err
-        result, err = normalize_rewrite_result(result)
-
-        if not result then
-          table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: " .. err)
-          append_report(review_buf, { "  failed: " .. err, "" })
-          process(index + 1)
-          return
-        end
-
-        if ctx.same_lines(original, result) then
-          skipped = skipped + 1
-          append_report(review_buf, { "  - no change for " .. quickfix_target_label(target), "" })
-          process(index + 1)
-          return
-        end
-
-        table.insert(changes, { target = target, original = original, result = result })
-        append_report(review_buf, {
-          "  ✓ prepared " .. quickfix_target_label(target) .. " (" .. #original .. " lines → " .. #result .. ")",
-          "",
-        })
-        process(index + 1)
-      end,
-      on_error = function(code)
-        if vim.api.nvim_buf_is_valid(tmp_buf) then
-          vim.api.nvim_buf_delete(tmp_buf, { force = true })
-        end
-        table.insert(failures, "- " .. quickfix_target_label(target) .. " failed: backend exit " .. tostring(code))
-        append_report(review_buf, { "  failed: backend exit " .. tostring(code), "" })
-        process(index + 1)
-      end,
-    })
-  end
-
-  process(1)
 end
 
 vim.keymap.set("n", "<leader>gq", function()
   quickfix_flow(
+    "quickfix_summarize",
     "Summarize the current quickfix target set. Group related entries and explain the likely work.",
     " 📋 quickfix │ summarize target set"
   )
@@ -1501,6 +1152,7 @@ end, { desc = "cogcog: summarize quickfix" })
 
 vim.keymap.set("n", "<leader>gQ", function()
   quickfix_flow(
+    "quickfix_review",
     "Review the current quickfix target set. Highlight the most important issues and likely fixes.",
     " 🧭 quickfix │ review target set"
   )
@@ -1550,11 +1202,7 @@ vim.keymap.set("n", "<leader>cc", function()
 end, { desc = "cogcog: clear workbench" })
 
 vim.keymap.set({ "n", "i" }, "<C-c>", function()
-  if next(stream.active_jobs) then
-    stream.cancel_all()
-  else
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-c>", true, false, true), "n", false)
-  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-c>", true, false, true), "n", false)
 end, { desc = "cogcog: cancel" })
 
 -- workbench restore notification

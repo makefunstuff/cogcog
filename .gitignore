@@ -1,11 +1,11 @@
 # cogcog - ignore generated and temporary files
 
 # cogcog state
-.cogcog/
-  # session and system prompts
-  session.md
-  system.md
-  discovery.md
+.cogcog/events.jsonl
+.cogcog/workbench.md
+.cogcog/session.md
+.cogcog/system.md
+.cogcog/discovery.md
 
 # vim swap files
 *.swp
