@@ -5,6 +5,9 @@
 .cogcog/session.md
 .cogcog/system.md
 .cogcog/discovery.md
+.cogcog/insights
+.cogcog/semantic
+.cogcog/semantic-summary
 
 # extension deps
 pi-extension/node_modules/
@@ -23,3 +26,8 @@ temp/
 # logs
 logs/
 *.log
+
+# hermes skill
+skills/hermes-cogcog/node_modules/
+skills/hermes-cogcog/dist/
+skills/hermes-cogcog/package-lock.json
