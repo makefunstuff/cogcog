@@ -6,15 +6,16 @@ CogCog is a Neovim-side operator layer for [pi](https://github.com/badlogic/pi-m
 It turns motions, selections, quickfix, and a scratch workbench into structured events,
 then hands those events to a claimed pi session over Neovim RPC.
 
-Two terminals, one loop:
+Two terminals, one loop — or three:
 
 ```text
-Terminal 1: nvim   scope, edits, quickfix, workbench
-Terminal 2: pi     agent turns, tools, multi-file work
+Terminal 1: nvim       scope, edits, quickfix, workbench
+Terminal 2: pi        agent turns, tools, multi-file work
+Terminal 3: hermes    agent turns, same tools, parallel with pi
 ```
 
 No chat panel inside Neovim. No hidden browser. No wrapper daemon.
-Just native vim state plus a pi bridge.
+Just native vim state plus a bridge — and now pi and Hermes can both use it.
 
 ## What works today
 
@@ -73,7 +74,17 @@ ln -s /path/to/cogcog/pi-extension ~/.pi/agent/extensions/cogcog
 
 Then start or reload pi.
 
-### 3. Claim the session that should receive CogCog events
+### 3. (Optional) Add Hermes support
+
+Hermes can use the same Neovim tools alongside pi — no conflict, no claim needed.
+
+```bash
+pip install pynvim
+```
+
+Hermes uses the skill at `skills/hermes-cogcog/` which calls `cogcog.bridge` functions directly over the same socket. See `skills/hermes-cogcog/README.md` for details.
+
+### 4. Claim the session that should receive CogCog events
 
 Inside pi:
 
@@ -85,7 +96,7 @@ Inside pi:
 
 Only the claimed pi session receives live CogCog events.
 
-### 4. Try the loop
+### 5. Try the loop
 
 In Neovim, put the cursor on some code and run:
 
@@ -221,8 +232,8 @@ Inside pi:
 
 ### Tools registered by the extension
 
-| Tool | What pi can do |
-|------|----------------|
+| Tool | What pi / Hermes can do |
+|------|------------------------|
 | `nvim_context` | inspect cwd, buffer, cursor, visible windows, quickfix, diagnostics |
 | `nvim_buffer` | read a loaded buffer |
 | `nvim_buffers` | list loaded buffers |
@@ -231,6 +242,27 @@ Inside pi:
 | `nvim_quickfix` | push findings into quickfix |
 | `nvim_exec` | run a Vim command |
 | `nvim_notify` | send a notification back to Neovim |
+
+Both pi and Hermes call the same `cogcog.bridge` Lua functions over the Neovim RPC socket. They don't interfere — pi claims the event channel, Hermes just calls tools ad-hoc.
+
+## Hermes bridge
+
+The `skills/hermes-cogcog/` directory contains a Python bridge that lets [Hermes](https://github.com/nicobailon/hermes) use the same Neovim tools as pi — context, buffers, diagnostics, goto, quickfix, exec, notify.
+
+Unlike the pi extension, Hermes doesn't claim the RPC channel. It attaches ad-hoc via `pynvim`, calls `require("cogcog.bridge")`, and detaches. This means pi and Hermes can run simultaneously without conflict.
+
+```bash
+# Check connection
+python3 skills/hermes-cogcog/scripts/cogcog_bridge.py status
+
+# Read current editor state
+python3 skills/hermes-cogcog/scripts/cogcog_bridge.py context
+
+# Open a file in Neovim
+python3 skills/hermes-cogcog/scripts/cogcog_bridge.py goto '{"path": "src/main.py", "line": 42}'
+```
+
+See `skills/hermes-cogcog/README.md` for the full tool reference.
 
 ## Internal event surface
 
@@ -308,7 +340,7 @@ lua/cogcog/context.lua      # scope builders, workbench helpers
 lua/cogcog/transport.lua    # User autocommands + pi event emission
 lua/cogcog/bridge.lua       # Neovim RPC surface for the pi extension
 pi-extension/               # pi extension (TypeScript)
-skills/nvim-bridge/         # helper notes for bridge usage
+skills/hermes-cogcog/       # Hermes bridge (Python + pynvim)
 .cogcog/                    # workbench + project-local state
 ```
 
@@ -319,9 +351,10 @@ CogCog is currently best thought of as:
 - a **precise Neovim event source**
 - a **workbench buffer**
 - a **pi bridge**
+- a **Hermes bridge** (parallel, no-conflict)
 - plus a small **Unix filter** in `bin/cogcog`
 
 It is not a self-contained chat UI inside Neovim.
-The bundled bridge intentionally keeps the editor simple and lets pi handle the agent loop.
+The bundled bridge intentionally keeps the editor simple and lets pi and Hermes handle the agent loops.
 
 See also: [CHEATSHEET.md](CHEATSHEET.md) · [TUTORIAL.md](TUTORIAL.md) · [USAGE.md](USAGE.md) · [UNIX_IS_YOUR_IDE.md](UNIX_IS_YOUR_IDE.md)
